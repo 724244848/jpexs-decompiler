@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -301,6 +301,9 @@ public class SoundTagPlayer implements MediaDisplay {
         return null;
     }
 
+    /*
+    Finalize is deprecated, let's see how this will work without it...
+    
     @Override
     protected void finalize() throws Throwable {
         try {
@@ -312,12 +315,17 @@ public class SoundTagPlayer implements MediaDisplay {
         } finally {
             super.finalize();
         }
-    }
+    }*/
 
     private void decreaseLoopCount() {
         // this method should be called from synchronized (playLock) block
         if (loopCount > 0 && loopCount != Integer.MAX_VALUE) {
             loopCount--;
         }
+    }
+
+    @Override
+    public Color getBackgroundColor() {
+        return Color.white;
     }
 }

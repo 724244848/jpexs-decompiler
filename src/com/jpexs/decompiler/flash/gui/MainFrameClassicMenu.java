@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -291,6 +291,9 @@ public class MainFrameClassicMenu extends MainFrameMenu {
             throw new IllegalArgumentException("Invalid menu: " + path);
         }
         if (path.startsWith("/file/recent")) {
+            return;
+        }
+        if (path.startsWith("/tools/recentsearch")) {
             return;
         }
         MenuElement me = menuElements.get(path);

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -32,11 +32,13 @@ import com.jpexs.decompiler.flash.tags.MetadataTag;
 import com.jpexs.decompiler.flash.tags.SetBackgroundColorTag;
 import com.jpexs.decompiler.flash.tags.Tag;
 import com.jpexs.decompiler.flash.tags.base.FontTag;
+import com.jpexs.decompiler.flash.tags.base.PlaceObjectTypeTag;
 import com.jpexs.decompiler.flash.tags.base.TextTag;
 import com.jpexs.decompiler.flash.timeline.Frame;
 import com.jpexs.decompiler.flash.timeline.TagScript;
 import com.jpexs.decompiler.flash.timeline.Timelined;
 import com.jpexs.decompiler.flash.treeitems.TreeItem;
+import com.jpexs.decompiler.flash.types.MATRIX;
 import com.jpexs.decompiler.flash.types.shaperecords.SHAPERECORD;
 import com.jpexs.helpers.SerializableImage;
 import java.awt.BorderLayout;
@@ -93,6 +95,8 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
 
     private static final String CARDFONTPANEL = "Font card";
 
+    private static final String PLACE_TAG_CARD = "PLACETAG";
+
     private final MainPanel mainPanel;
 
     private final JPanel viewerCards;
@@ -141,6 +145,12 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
 
     private JButton genericCancelButton;
 
+    private JButton placeEditButton;
+
+    private JButton placeSaveButton;
+
+    private JButton placeCancelButton;
+
     private JPanel parametersPanel;
 
     private FontPanel fontPanel;
@@ -153,7 +163,13 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
 
     private boolean readOnly = false;
 
+    private ImagePanel placeImagePanel;
+
     private final int dividerSize;
+
+    private PlaceObjectTypeTag placeTag;
+
+    private MATRIX oldMatrix;
 
     public void setReadOnly(boolean readOnly) {
         this.readOnly = readOnly;
@@ -176,6 +192,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
         viewerCards.add(createBinaryCard(), BINARY_TAG_CARD);
         viewerCards.add(createMetadataCard(), METADATA_TAG_CARD);
         viewerCards.add(createGenericTagCard(), GENERIC_TAG_CARD);
+        viewerCards.add(createPlaceTagCard(), PLACE_TAG_CARD);
         viewerCards.add(createEmptyCard(), EMPTY_CARD);
         setLeftComponent(viewerCards);
 
@@ -352,7 +369,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
     private JPanel createMetadataCard() {
         JPanel metadataCard = new JPanel(new BorderLayout());
         metadataEditor = new LineMarkedEditorPane();
-        metadataCard.add(new JScrollPane(metadataEditor), BorderLayout.CENTER);
+        metadataCard.add(new FasterScrollPane(metadataEditor), BorderLayout.CENTER);
         //metadataEditor.setContentType("text/xml");
         metadataEditor.setEditable(false);
 
@@ -401,6 +418,49 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
         genericTagCard.add(genericTagPanel, BorderLayout.CENTER);
         genericTagCard.add(createGenericTagButtonsPanel(), BorderLayout.SOUTH);
         return genericTagCard;
+    }
+
+    private JPanel createPlaceTagCard() {
+        JPanel placeTagCard = new JPanel(new BorderLayout());
+
+        JPanel previewPanel = new JPanel(new BorderLayout());
+
+        JPanel previewCnt = new JPanel(new BorderLayout());
+        placeImagePanel = new ImagePanel();
+        //imagePanel.setLoop(Configuration.loopMedia.get());
+        previewCnt.add(placeImagePanel, BorderLayout.CENTER);
+        PlayerControls placeImagePlayControls = new PlayerControls(mainPanel, placeImagePanel);
+        previewCnt.add(placeImagePlayControls, BorderLayout.SOUTH);
+        placeImagePlayControls.setMedia(placeImagePanel);
+        previewPanel.add(previewCnt, BorderLayout.CENTER);
+        JLabel prevIntLabel = new HeaderLabel(mainPanel.translate("swfpreview.internal"));
+        prevIntLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        previewPanel.add(prevIntLabel, BorderLayout.NORTH);
+
+        placeTagCard.add(previewPanel, BorderLayout.CENTER);
+        placeTagCard.add(createPlaceTagButtonsPanel(), BorderLayout.SOUTH);
+
+        return placeTagCard;
+    }
+
+    private JPanel createPlaceTagButtonsPanel() {
+        placeEditButton = new JButton(mainPanel.translate("button.edit"), View.getIcon("edit16"));
+        placeEditButton.setMargin(new Insets(3, 3, 3, 10));
+        placeEditButton.addActionListener(this::editPlaceTagButtonActionPerformed);
+        placeSaveButton = new JButton(mainPanel.translate("button.save"), View.getIcon("save16"));
+        placeSaveButton.setMargin(new Insets(3, 3, 3, 10));
+        placeSaveButton.addActionListener(this::savePlaceTagButtonActionPerformed);
+        placeSaveButton.setVisible(false);
+        placeCancelButton = new JButton(mainPanel.translate("button.cancel"), View.getIcon("cancel16"));
+        placeCancelButton.setMargin(new Insets(3, 3, 3, 10));
+        placeCancelButton.addActionListener(this::cancelPlaceTagButtonActionPerformed);
+        placeCancelButton.setVisible(false);
+
+        ButtonsPanel placeTagButtonsPanel = new ButtonsPanel();
+        placeTagButtonsPanel.add(placeEditButton);
+        placeTagButtonsPanel.add(placeSaveButton);
+        placeTagButtonsPanel.add(placeCancelButton);
+        return placeTagButtonsPanel;
     }
 
     private void showCardLeft(String card) {
@@ -467,7 +527,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
     }
 
     private void showFontPage(FontTag fontTag) {
-        if (mainPanel.isInternalFlashViewerSelected() /*|| ft instanceof GFxDefineCompactedFont*/) {
+        if (!mainPanel.isAdobeFlashPlayerEnabled() /*|| ft instanceof GFxDefineCompactedFont*/) {
             showImagePanel(MainPanel.makeTimelined(fontTag), fontTag.getSwf(), fontPageNum);
         }
     }
@@ -485,7 +545,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
     }
 
     public void showTextPanel(TextTag textTag) {
-        if (mainPanel.isInternalFlashViewerSelected() /*|| ft instanceof GFxDefineCompactedFont*/) {
+        if (!mainPanel.isAdobeFlashPlayerEnabled() /*|| ft instanceof GFxDefineCompactedFont*/) {
             showImagePanel(MainPanel.makeTimelined(textTag), textTag.getSwf(), 0);
         }
 
@@ -560,10 +620,24 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
     public void showGenericTagPanel(Tag tag) {
         showCardLeft(GENERIC_TAG_CARD);
         genericEditButton.setVisible(!tag.isReadOnly());
+        genericEditButton.setEnabled(true);
         genericSaveButton.setVisible(false);
         genericCancelButton.setVisible(false);
         genericTagPanel.setEditMode(false, tag);
         parametersPanel.setVisible(false);
+    }
+
+    public void showPlaceTagPanel(PlaceObjectTypeTag tag, int frame) {
+        showCardLeft(PLACE_TAG_CARD);
+        placeTag = tag;
+        oldMatrix = tag.getMatrix();
+        placeImagePanel.setTimelined(((Tag) tag).getTimelined(), ((Tag) tag).getSwf(), frame);
+        placeImagePanel.selectDepth(tag.getDepth());
+        parametersPanel.setVisible(false);
+        placeEditButton.setVisible(!tag.isReadOnly());
+        placeEditButton.setEnabled(true);
+        placeSaveButton.setVisible(false);
+        placeCancelButton.setVisible(false);
     }
 
     public void setImageReplaceButtonVisible(boolean show, boolean showAlpha) {
@@ -635,7 +709,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
                 swf.saveTo(fos, false);
             }
             //Inject Loader
-            if (swf.isAS3() && Configuration.autoOpenLoadedSWFs.get() && !Configuration.internalFlashViewer.get() && !DebuggerTools.hasDebugger(swf)) {
+            if (swf.isAS3() && Configuration.autoOpenLoadedSWFs.get() && Configuration.useAdobeFlashPlayerForPreviews.get() && !DebuggerTools.hasDebugger(swf)) {
                 SWF instrSWF;
                 try (InputStream fis = new BufferedInputStream(new FileInputStream(tempFile))) {
                     instrSWF = new SWF(fis, false, false);
@@ -727,11 +801,48 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
         genericTagPanel.setEditMode(false, null);
     }
 
+    private void savePlaceTagButtonActionPerformed(ActionEvent evt) {
+        MATRIX matrix = placeImagePanel.getNewMatrix();
+        placeTag.setPlaceFlagHasMatrix(true);
+        placeTag.setMatrix(matrix);
+        placeTag.setModified(true);
+        placeImagePanel.selectDepth(placeTag.getDepth());
+        placeImagePanel.freeTransformDepth(-1);
+        placeTag.getTimelined().resetTimeline();
+        placeEditButton.setVisible(true);
+        placeSaveButton.setVisible(false);
+        placeCancelButton.setVisible(false);
+        mainPanel.repaintTree();
+    }
+
+    private void editPlaceTagButtonActionPerformed(ActionEvent evt) {
+        TreeItem item = mainPanel.tagTree.getCurrentTreeItem();
+        if (item == null) {
+            return;
+        }
+        placeImagePanel.selectDepth(-1);
+        placeImagePanel.freeTransformDepth(placeTag.getDepth());
+        placeEditButton.setVisible(false);
+        placeSaveButton.setVisible(true);
+        placeCancelButton.setVisible(true);
+    }
+
+    private void cancelPlaceTagButtonActionPerformed(ActionEvent evt) {
+        placeImagePanel.selectDepth(placeTag.getDepth());
+        placeImagePanel.freeTransformDepth(-1);
+        placeTag.setMatrix(oldMatrix);
+        placeTag.getTimelined().resetTimeline();
+
+        placeEditButton.setVisible(true);
+        placeSaveButton.setVisible(false);
+        placeCancelButton.setVisible(false);
+    }
+
     private void prevFontsButtonActionPerformed(ActionEvent evt) {
         FontTag fontTag = fontPanel.getFontTag();
         int pageCount = getFontPageCount(fontTag);
         fontPageNum = (fontPageNum + pageCount - 1) % pageCount;
-        if (mainPanel.isInternalFlashViewerSelected() /*|| ft instanceof GFxDefineCompactedFont*/) {
+        if (!mainPanel.isAdobeFlashPlayerEnabled() /*|| ft instanceof GFxDefineCompactedFont*/) {
             imagePanel.setTimelined(MainPanel.makeTimelined(fontTag, fontPageNum), fontTag.getSwf(), 0);
         }
     }
@@ -740,7 +851,7 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
         FontTag fontTag = fontPanel.getFontTag();
         int pageCount = getFontPageCount(fontTag);
         fontPageNum = (fontPageNum + 1) % pageCount;
-        if (mainPanel.isInternalFlashViewerSelected() /*|| ft instanceof GFxDefineCompactedFont*/) {
+        if (!mainPanel.isAdobeFlashPlayerEnabled() /*|| ft instanceof GFxDefineCompactedFont*/) {
             imagePanel.setTimelined(MainPanel.makeTimelined(fontTag, fontPageNum), fontTag.getSwf(), 0);
         }
     }
@@ -756,5 +867,9 @@ public class PreviewPanel extends JPersistentSplitPane implements TagEditorPanel
         return textPanel.isEditing()
                 || (genericSaveButton.isVisible() && genericSaveButton.isEnabled())
                 || (metadataSaveButton.isVisible() && metadataSaveButton.isEnabled());
+    }
+
+    public void selectImageDepth(int depth) {
+        imagePanel.selectDepth(depth);
     }
 }

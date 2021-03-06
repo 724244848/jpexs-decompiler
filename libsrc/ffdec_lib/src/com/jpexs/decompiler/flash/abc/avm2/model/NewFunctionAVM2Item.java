@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.flash.abc.avm2.model;
 
 import com.jpexs.decompiler.flash.abc.ABC;
@@ -28,6 +29,7 @@ import com.jpexs.decompiler.graph.GraphTargetItem;
 import com.jpexs.decompiler.graph.ScopeStack;
 import com.jpexs.decompiler.graph.TypeItem;
 import com.jpexs.decompiler.graph.model.LocalData;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -52,7 +54,9 @@ public class NewFunctionAVM2Item extends AVM2Item {
 
     public int methodIndex;
 
-    public NewFunctionAVM2Item(GraphSourceItem instruction, GraphSourceItem lineStartIns, String functionName, String path, boolean isStatic, int scriptIndex, int classIndex, ABC abc, List<DottedChain> fullyQualifiedNames, int methodIndex) {
+    public ScopeStack scopeStack;
+
+    public NewFunctionAVM2Item(GraphSourceItem instruction, GraphSourceItem lineStartIns, String functionName, String path, boolean isStatic, int scriptIndex, int classIndex, ABC abc, List<DottedChain> fullyQualifiedNames, int methodIndex, ScopeStack scopeStack) {
         super(instruction, lineStartIns, PRECEDENCE_PRIMARY);
         this.functionName = functionName;
         this.path = path;
@@ -62,10 +66,15 @@ public class NewFunctionAVM2Item extends AVM2Item {
         this.abc = abc;
         this.fullyQualifiedNames = fullyQualifiedNames;
         this.methodIndex = methodIndex;
+        this.scopeStack = scopeStack;
     }
 
     @Override
     public GraphTextWriter appendTo(GraphTextWriter writer, LocalData localData) throws InterruptedException {
+        if (localData.seenMethods.contains(methodIndex)) {
+            return writer.append("§§method(").append(methodIndex).append(")");
+        }
+        //if (methodIndex == 9141)
         MethodBody body = abc.findBody(methodIndex);
         writer.append("function");
         writer.startMethod(methodIndex);
@@ -83,8 +92,8 @@ public class NewFunctionAVM2Item extends AVM2Item {
         abc.method_info.get(methodIndex).getReturnTypeStr(writer, abc.constants, fullyQualifiedNames);
         writer.startBlock();
         if (body != null) {
-            body.convert(new ConvertData(), path + "/inner", ScriptExportMode.AS, isStatic, methodIndex, scriptIndex, classIndex, abc, null, new ScopeStack(), 0, new NulWriter(), fullyQualifiedNames, null, false);
-            body.toString(path + "/inner", ScriptExportMode.AS, abc, null, writer, fullyQualifiedNames);
+            body.convert(new ConvertData(), path + "/inner", ScriptExportMode.AS, isStatic, methodIndex, scriptIndex, classIndex, abc, null, new ScopeStack(), 0, new NulWriter(), fullyQualifiedNames, null, false, new HashSet<>(localData.seenMethods));
+            body.toString(path + "/inner", ScriptExportMode.AS, abc, null, writer, fullyQualifiedNames, new HashSet<>(localData.seenMethods));
         }
         writer.endBlock();
         writer.endMethod();

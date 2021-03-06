@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +18,7 @@ package com.jpexs.decompiler.flash.action.model;
 import com.jpexs.decompiler.flash.helpers.GraphTextWriter;
 import com.jpexs.decompiler.graph.GraphSourceItemPos;
 import com.jpexs.decompiler.graph.GraphTargetItem;
+import com.jpexs.decompiler.graph.GraphTargetVisitorInterface;
 import com.jpexs.decompiler.graph.model.LocalData;
 import java.util.List;
 
@@ -59,8 +60,8 @@ public class TemporaryRegister extends ActionItem {
     }
 
     @Override
-    public List<GraphTargetItem> getAllSubItems() {
-        return value.getAllSubItems();
+    public void visit(GraphTargetVisitorInterface visitor) {
+        visitor.visit(value);
     }
 
     @Override

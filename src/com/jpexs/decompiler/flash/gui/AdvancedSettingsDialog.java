@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@ import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.ParameterizedType;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -91,11 +92,6 @@ public class AdvancedSettingsDialog extends AppDialog {
 
     private JButton resetButton;
 
-    /**
-     * Creates new form AdvancedSettingsDialog
-     *
-     * @param selectedCategory
-     */
     public AdvancedSettingsDialog(String selectedCategory) {
         initComponents(selectedCategory);
         View.centerScreen(this);
@@ -176,7 +172,7 @@ public class AdvancedSettingsDialog extends AppDialog {
 
         Container cnt = getContentPane();
         cnt.setLayout(new BorderLayout());
-        //cnt.add(new JScrollPane(configurationTable),BorderLayout.CENTER);
+        //cnt.add(new FasterScrollPane(configurationTable),BorderLayout.CENTER);
 
         JPanel buttonsPanel = new JPanel(new BorderLayout());
 
@@ -209,7 +205,7 @@ public class AdvancedSettingsDialog extends AppDialog {
                         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                         try {
                             Class<?> act = Class.forName(ss.getClassName());
-                            SubstanceSkin skin = (SubstanceSkin) act.newInstance();
+                            SubstanceSkin skin = (SubstanceSkin) act.getDeclaredConstructor().newInstance();
                             Color fill = skin.getColorScheme(DecorationAreaType.GENERAL, ColorSchemeAssociationKind.FILL, ComponentState.ENABLED).getBackgroundFillColor();
                             Color hilight = skin.getColorScheme(DecorationAreaType.GENERAL, ColorSchemeAssociationKind.FILL, ComponentState.ROLLOVER_SELECTED).getBackgroundFillColor();
                             Color border = skin.getColorScheme(DecorationAreaType.GENERAL, ColorSchemeAssociationKind.BORDER, ComponentState.ENABLED).getDarkColor();
@@ -220,7 +216,7 @@ public class AdvancedSettingsDialog extends AppDialog {
                             g2.setColor(border);
                             g2.drawOval(0, 0, 16, 16);
 
-                        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException ex) {
+                        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | IllegalArgumentException | InvocationTargetException | NoSuchMethodException | SecurityException ex) {
                             //no icon
                         }
 
@@ -491,7 +487,7 @@ public class AdvancedSettingsDialog extends AppDialog {
                 p.add(tipPanel, BorderLayout.SOUTH);
                 configPanel = p;
             }
-            tabs.put(cat, new JScrollPane(configPanel));
+            tabs.put(cat, new FasterScrollPane(configPanel));
         }
     }
 

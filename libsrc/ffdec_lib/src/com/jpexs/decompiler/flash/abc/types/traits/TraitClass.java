@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.flash.abc.types.traits;
 
 import com.jpexs.decompiler.flash.abc.ABC;
@@ -36,6 +37,7 @@ import com.jpexs.decompiler.graph.ScopeStack;
 import com.jpexs.decompiler.graph.TypeItem;
 import com.jpexs.helpers.Helper;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -67,8 +69,8 @@ public class TraitClass extends Trait implements TraitWithSlot {
     }
 
     @Override
-    public void getDependencies(String customNs, ABC abc, List<Dependency> dependencies, List<String> uses, DottedChain ignorePackage, List<DottedChain> fullyQualifiedNames) {
-        super.getDependencies(customNs, abc, dependencies, uses, ignorePackage == null ? getPackage(abc) : ignorePackage, fullyQualifiedNames);
+    public void getDependencies(int scriptIndex, int classIndex, boolean isStatic, String customNs, ABC abc, List<Dependency> dependencies, List<String> uses, DottedChain ignorePackage, List<DottedChain> fullyQualifiedNames) throws InterruptedException {
+        super.getDependencies(scriptIndex, -1, false, customNs, abc, dependencies, uses, ignorePackage == null ? getPackage(abc) : ignorePackage, fullyQualifiedNames);
         ClassInfo classInfo = abc.class_info.get(class_info);
         InstanceInfo instanceInfo = abc.instance_info.get(class_info);
         DottedChain packageName = instanceInfo.getName(abc.constants).getNamespace(abc.constants).getName(abc.constants); //assume not null name
@@ -82,16 +84,16 @@ public class TraitClass extends Trait implements TraitWithSlot {
         }
 
         //static
-        classInfo.static_traits.getDependencies(customNs, abc, dependencies, uses, packageName, fullyQualifiedNames);
+        classInfo.static_traits.getDependencies(scriptIndex, class_info, true, customNs, abc, dependencies, uses, packageName, fullyQualifiedNames);
 
         //static initializer
-        DependencyParser.parseDependenciesFromMethodInfo(customNs, abc, classInfo.cinit_index, dependencies, uses, packageName, fullyQualifiedNames, new ArrayList<>());
+        DependencyParser.parseDependenciesFromMethodInfo(null, scriptIndex, class_info, true, customNs, abc, classInfo.cinit_index, dependencies, uses, packageName, fullyQualifiedNames, new ArrayList<>());
 
         //instance
-        instanceInfo.instance_traits.getDependencies(customNs, abc, dependencies, uses, packageName, fullyQualifiedNames);
+        instanceInfo.instance_traits.getDependencies(scriptIndex, class_info, false, customNs, abc, dependencies, uses, packageName, fullyQualifiedNames);
 
         //instance initializer
-        DependencyParser.parseDependenciesFromMethodInfo(customNs, abc, instanceInfo.iinit_index, dependencies, uses, packageName, fullyQualifiedNames, new ArrayList<>());
+        DependencyParser.parseDependenciesFromMethodInfo(null, scriptIndex, class_info, false, customNs, abc, instanceInfo.iinit_index, dependencies, uses, packageName, fullyQualifiedNames, new ArrayList<>());
     }
 
     @Override
@@ -112,7 +114,7 @@ public class TraitClass extends Trait implements TraitWithSlot {
         DottedChain packageName = instanceInfoMultiname.getNamespace(abc.constants).getName(abc.constants); //assume not null name
 
         fullyQualifiedNames = new ArrayList<>();
-        writeImportsUsages(abc, writer, packageName, fullyQualifiedNames);
+        writeImportsUsages(scriptIndex, classIndex, false, abc, writer, packageName, fullyQualifiedNames);
 
         String instanceInfoName = instanceInfoMultiname.getName(abc.constants, fullyQualifiedNames, false, true);
 
@@ -135,7 +137,7 @@ public class TraitClass extends Trait implements TraitWithSlot {
             if (exportMode != ScriptExportMode.AS_METHOD_STUBS) {
                 if (!classInitializerIsEmpty) {
                     writer.startBlock();
-                    abc.bodies.get(bodyIndex).toString(path +/*packageName +*/ "/" + instanceInfoName + ".staticinitializer", exportMode, abc, this, writer, fullyQualifiedNames);
+                    abc.bodies.get(bodyIndex).toString(path +/*packageName +*/ "/" + instanceInfoName + ".staticinitializer", exportMode, abc, this, writer, fullyQualifiedNames, new HashSet<>());
                     writer.endBlock();
                 } else {
                     //Note: There must be trait/method highlight even if the initializer is empty to TraitList in GUI to work correctly
@@ -183,7 +185,7 @@ public class TraitClass extends Trait implements TraitWithSlot {
             writer.appendNoHilight(")").startBlock();
             if (exportMode != ScriptExportMode.AS_METHOD_STUBS) {
                 if (body != null) {
-                    body.toString(path +/*packageName +*/ "/" + instanceInfoName + ".initializer", exportMode, abc, this, writer, fullyQualifiedNames);
+                    body.toString(path +/*packageName +*/ "/" + instanceInfoName + ".initializer", exportMode, abc, this, writer, fullyQualifiedNames, new HashSet<>());
                 }
             }
 
@@ -215,7 +217,17 @@ public class TraitClass extends Trait implements TraitWithSlot {
 
         AbcIndexing index = new AbcIndexing(abc.getSwf());
         //for simplification of String(this)
-        convertData.thisHasDefaultToPrimitive = null == index.findProperty(new AbcIndexing.PropertyDef("toString", new TypeItem(instanceInfo.getName(abc.constants).getNameWithNamespace(abc.constants, true)), abc, abc.constants.getNamespaceId(Namespace.KIND_PACKAGE, DottedChain.TOPLEVEL, abc.constants.getStringId("", true), true)), false, true);
+        int sIndex = abc.constants.getStringId("", false);
+        if (sIndex > -1) {
+            int nsIndex = abc.constants.getNamespaceId(Namespace.KIND_PACKAGE, DottedChain.TOPLEVEL, sIndex, false);
+            if (nsIndex > -1) {
+                convertData.thisHasDefaultToPrimitive = null == index.findProperty(new AbcIndexing.PropertyDef("toString", new TypeItem(instanceInfo.getName(abc.constants).getNameWithNamespace(abc.constants, true)), abc, nsIndex), false, true);
+            } else {
+                convertData.thisHasDefaultToPrimitive = true;
+            }
+        } else {
+            convertData.thisHasDefaultToPrimitive = true;
+        }
 
         //class initializer
         int bodyIndex = abc.findBodyIndex(classInfo.cinit_index);
@@ -223,7 +235,7 @@ public class TraitClass extends Trait implements TraitWithSlot {
             writer.mark();
             List<Traits> ts = new ArrayList<>();
             ts.add(classInfo.static_traits);
-            abc.bodies.get(bodyIndex).convert(convertData, path +/*packageName +*/ "/" + instanceInfoName + ".staticinitializer", exportMode, true, classInfo.cinit_index, scriptIndex, class_info, abc, this, new ScopeStack(), GraphTextWriter.TRAIT_CLASS_INITIALIZER, writer, fullyQualifiedNames, ts, true);
+            abc.bodies.get(bodyIndex).convert(convertData, path +/*packageName +*/ "/" + instanceInfoName + ".staticinitializer", exportMode, true, classInfo.cinit_index, scriptIndex, class_info, abc, this, new ScopeStack(), GraphTextWriter.TRAIT_CLASS_INITIALIZER, writer, fullyQualifiedNames, ts, true, new HashSet<>());
             classInitializerIsEmpty = !writer.getMark();
         }
 
@@ -233,7 +245,7 @@ public class TraitClass extends Trait implements TraitWithSlot {
             if (bodyIndex != -1) {
                 List<Traits> ts = new ArrayList<>();
                 ts.add(instanceInfo.instance_traits);
-                abc.bodies.get(bodyIndex).convert(convertData, path +/*packageName +*/ "/" + instanceInfoName + ".initializer", exportMode, false, instanceInfo.iinit_index, scriptIndex, class_info, abc, this, new ScopeStack(), GraphTextWriter.TRAIT_INSTANCE_INITIALIZER, writer, fullyQualifiedNames, ts, true);
+                abc.bodies.get(bodyIndex).convert(convertData, path +/*packageName +*/ "/" + instanceInfoName + ".initializer", exportMode, false, instanceInfo.iinit_index, scriptIndex, class_info, abc, this, new ScopeStack(), GraphTextWriter.TRAIT_INSTANCE_INITIALIZER, writer, fullyQualifiedNames, ts, true, new HashSet<>());
             }
         }
 
@@ -273,6 +285,9 @@ public class TraitClass extends Trait implements TraitWithSlot {
         writer.appendNoHilight(" slotid ");
         writer.hilightSpecial(Integer.toString(slot_id), HighlightSpecialType.SLOT_ID);
         writer.newLine();
+        /*writer.appendNoHilight("class_info "); //not in RAbcDasm
+        writer.appendNoHilight("" + class_info);
+        writer.newLine();*/
         return writer;
     }
 

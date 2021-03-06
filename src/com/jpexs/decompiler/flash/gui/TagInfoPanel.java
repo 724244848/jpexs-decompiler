@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -54,7 +54,7 @@ public class TagInfoPanel extends JPanel {
         setLayout(new BorderLayout());
         JLabel topLabel = new JLabel(AppStrings.translate("taginfo.header"), JLabel.CENTER);
         add(topLabel, BorderLayout.NORTH);
-        add(new JScrollPane(editorPane), BorderLayout.CENTER);
+        add(new FasterScrollPane(editorPane), BorderLayout.CENTER);
 
         editorPane.setContentType("text/html");
         editorPane.setEditable(false);

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.flash.timeline;
 
 import com.jpexs.decompiler.flash.SWF;
@@ -98,7 +99,7 @@ public class Timeline {
 
     private final Map<Integer, Integer> depthMaxFrame = new HashMap<>();
 
-    private final List<ASMSource> asmSources = new ArrayList<>();
+    public final List<ASMSource> asmSources = new ArrayList<>();
 
     private final List<ASMSourceContainer> asmSourceContainers = new ArrayList<>();
 
@@ -305,6 +306,13 @@ public class Timeline {
                 if (characterId != -1) {
                     fl.characterId = characterId;
                 }
+                CharacterTag character = swf.getCharacter(characterId);
+                if (character instanceof DefineSpriteTag) {
+                    Stack<Integer> cyStack = new Stack<>();
+                    if (isCyclic(timelined, cyStack)) {
+                        fl.characterId = -1;
+                    }
+                }
                 if (po.flagMove()) {
                     MATRIX matrix2 = po.getMatrix();
                     if (matrix2 != null) {
@@ -447,7 +455,9 @@ public class Timeline {
             if (asm instanceof DoInitActionTag) {
                 DoInitActionTag initAction = (DoInitActionTag) asm;
                 String path = swf.getExportName(initAction.spriteId);
-                path = path != null ? path : "_unk_";
+                if (path == null) {
+                    continue;
+                }
                 if (path.isEmpty()) {
                     path = initAction.getExportFileName();
                 }
@@ -1210,6 +1220,30 @@ public class Timeline {
             return timelined.equals(timelineObj.timelined);
         }
 
+        return false;
+    }
+
+    private boolean isCyclic(Timelined tim, Stack<Integer> walked) {
+        for (Tag t : tim.getTags()) {
+            if (t instanceof PlaceObjectTypeTag) {
+                PlaceObjectTypeTag p = (PlaceObjectTypeTag) t;
+                int chid = p.getCharacterId();
+                if (chid != -1) {
+                    if (walked.contains(chid)) {
+                        return true;
+                    }
+                    CharacterTag character = swf.getCharacter(chid);
+                    if (character instanceof DefineSpriteTag) {
+                        walked.push(chid);
+                        if (isCyclic((DefineSpriteTag) character, walked)) {
+                            walked.pop();
+                            return true;
+                        }
+                        walked.pop();
+                    }
+                }
+            }
+        }
         return false;
     }
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.flash.abc.avm2.instructions.localregs;
 
 import com.jpexs.decompiler.flash.abc.ABC;
@@ -61,6 +62,7 @@ public abstract class SetLocalTypeIns extends InstructionDefinition implements S
     public void translate(AVM2LocalData localData, TranslateStack stack, AVM2Instruction ins, List<GraphTargetItem> output, String path) {
         int regId = getRegisterId(ins);
         GraphTargetItem value = stack.pop();
+
         /*if (localRegs.containsKey(regId)) {
          localRegs.put(regId, new NotCompileTimeAVM2Item(ins, localData.lineStartInstruction, value));
          } else {
@@ -126,19 +128,17 @@ public abstract class SetLocalTypeIns extends InstructionDefinition implements S
             }
         }
 
-        //if(val.startsWith("catchscope ")) return;
-        //if(val.startsWith("newactivation()")) return;
-        output.add(new SetLocalAVM2Item(ins, localData.lineStartInstruction, regId, value));
+        /*if (localData.getSetLocalUsages(localData.code.adr2pos(ins.getAddress())).isEmpty() && (value instanceof DuplicateItem)) {
+            return;
+        }*/
+        GraphTargetItem result = new SetLocalAVM2Item(ins, localData.lineStartInstruction, regId, value);
+
+        SetTypeIns.handleResult(value, stack, output, localData, result, regId);
     }
 
     @Override
     public int getStackPopCount(AVM2Instruction ins, ABC abc) {
         return 1;
-    }
-
-    @Override
-    public String getObject(Stack<AVM2Item> stack, ABC abc, AVM2Instruction ins, List<AVM2Item> output, MethodBody body, HashMap<Integer, String> localRegNames, List<DottedChain> fullyQualifiedNames) {
-        return AVM2Item.localRegName(localRegNames, getRegisterId(ins));
     }
 
     public abstract int getRegisterId(AVM2Instruction ins);

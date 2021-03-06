@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -1128,7 +1128,11 @@ public class CommandLineArgumentParser {
         final File swfFile = new File(args.pop());
         processReadSWF(swfFile, null, (SWF swf, OutputStream stdout) -> {
             SwfToSwcExporter exporter = new SwfToSwcExporter();
-            exporter.exportSwf(swf, outFile, false);
+            try {
+                exporter.exportSwf(swf, outFile, false);
+            } catch (IOException | InterruptedException ex) {
+                Logger.getLogger(CommandLineArgumentParser.class.getName()).log(Level.SEVERE, null, ex);
+            }
         });
     }
 
@@ -1160,6 +1164,7 @@ public class CommandLineArgumentParser {
             badArguments("getinstancemetadata");
         }
         processReadSWF(swfFile, stdOutFile, (SWF swf, OutputStream stdout) -> {
+
             LinkReportExporter lre = new LinkReportExporter();
 
             List<ScriptPack> reportPacks;
@@ -1170,9 +1175,12 @@ public class CommandLineArgumentParser {
                 System.exit(1);
                 return;
             }
-
-            String reportStr = lre.generateReport(swf, reportPacks, null);
-            stdout.write(reportStr.getBytes("UTF-8"));
+            try {
+                String reportStr = lre.generateReport(swf, reportPacks, null);
+                stdout.write(reportStr.getBytes("UTF-8"));
+            } catch (InterruptedException ex) {
+                System.err.println("Report generation interrupted");
+            }
         });
     }
 
@@ -3553,7 +3561,7 @@ public class CommandLineArgumentParser {
     private static void replaceAS2(String as, ASMSource src) throws IOException, InterruptedException {
         System.out.println("Replace AS1/2");
         System.out.println("Warning: This feature is EXPERIMENTAL");
-        ActionScript2Parser par = new ActionScript2Parser(src.getSwf().version);
+        ActionScript2Parser par = new ActionScript2Parser(src.getSwf(), src);
         try {
             src.setActions(par.actionsFromString(as));
         } catch (ActionParseException ex) {

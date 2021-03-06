@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -671,7 +671,11 @@ public class LineMarkedEditorPane extends UndoFixedEditorPane implements LinkHan
             line += firstLineOffset();
             g.fillRect(0, d + lh * (line - 1), getWidth(), lh);
         }
-        super.paint(g);
+        try {
+            super.paint(g);
+        } catch (Exception ex) {
+            //ignore
+        }
         for (int line : lineMarkers.keySet()) {
 
             SortedSet<LineMarker> cs = lineMarkers.get(line);

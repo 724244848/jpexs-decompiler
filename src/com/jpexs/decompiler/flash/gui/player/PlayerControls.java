@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Toolkit;
@@ -42,6 +43,7 @@ import java.awt.font.TextAttribute;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.Map;
 import javax.swing.BoxLayout;
@@ -390,7 +392,7 @@ public class PlayerControls extends JPanel implements MediaDisplayListener {
         if (lg < 0) {
             lg = 0;
         }
-        BigDecimal bd = new BigDecimal(String.valueOf(realZoom)).setScale(lg, BigDecimal.ROUND_HALF_UP);
+        BigDecimal bd = new BigDecimal(String.valueOf(realZoom)).setScale(lg, RoundingMode.HALF_UP);
         return bd.doubleValue();
     }
 
@@ -584,7 +586,16 @@ public class PlayerControls extends JPanel implements MediaDisplayListener {
         if (img == null) {
             return;
         }
-        TransferableImage trans = new TransferableImage(img);
+
+        //Copy to clipboard does not support transparency
+        BufferedImage newImage = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = newImage.createGraphics();
+        g.setColor(display.getBackgroundColor());
+        g.fillRect(0, 0, img.getWidth(), img.getHeight());
+        g.drawImage(img, 0, 0, null);
+        g.dispose();
+
+        TransferableImage trans = new TransferableImage(newImage);
         Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
         c.setContents(trans, new ClipboardOwner() {
             @Override

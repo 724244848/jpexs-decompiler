@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -302,6 +302,11 @@ public class AVM2DeobfuscatorRegisters extends AVM2DeobfuscatorSimple {
                         @Override
                         public long pos2adr(int pos) {
                             return code.pos2adr(pos);
+                        }
+
+                        @Override
+                        public int adr2pos(long adr, boolean nearest) {
+                            return code.adr2pos(adr, nearest);
                         }
 
                         @Override

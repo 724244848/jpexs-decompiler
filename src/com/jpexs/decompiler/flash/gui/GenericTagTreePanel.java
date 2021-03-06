@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -31,6 +31,8 @@ import com.jpexs.decompiler.flash.tags.Tag;
 import com.jpexs.decompiler.flash.tags.base.ASMSource;
 import com.jpexs.decompiler.flash.types.ARGB;
 import com.jpexs.decompiler.flash.types.BasicType;
+import com.jpexs.decompiler.flash.types.CLIPACTIONRECORD;
+import com.jpexs.decompiler.flash.types.CLIPACTIONS;
 import com.jpexs.decompiler.flash.types.RGB;
 import com.jpexs.decompiler.flash.types.RGBA;
 import com.jpexs.decompiler.flash.types.annotations.Conditional;
@@ -299,7 +301,7 @@ public class GenericTagTreePanel extends GenericTagPanel {
         setLayout(new BorderLayout());
         tree = new MyTree();
 
-        add(new JScrollPane(tree), BorderLayout.CENTER);
+        add(new FasterScrollPane(tree), BorderLayout.CENTER);
         tree.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -465,7 +467,11 @@ public class GenericTagTreePanel extends GenericTagPanel {
 
     @Override
     public void clear() {
-
+        tag = null;
+        editedTag = null;
+        tree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode("root")));
+        revalidate();
+        repaint();
     }
 
     private static final class TableFieldNodes extends DefaultMutableTreeNode {
@@ -918,6 +924,9 @@ public class GenericTagTreePanel extends GenericTagPanel {
     }
 
     private TreeModel getModel() {
+        if (editedTag == null) {
+            return new DefaultTreeModel(new DefaultMutableTreeNode("root"));
+        }
         return new MyTreeModel(editedTag);
     }
 
@@ -928,7 +937,7 @@ public class GenericTagTreePanel extends GenericTagPanel {
         }
         this.tag = tag;
         try {
-            editedTag = tag.cloneTag();
+            editedTag = tag == null ? null : tag.cloneTag();
         } catch (InterruptedException ex) {
         } catch (IOException ex) {
             logger.log(Level.SEVERE, null, ex);
@@ -1168,12 +1177,19 @@ public class GenericTagTreePanel extends GenericTagPanel {
                 return;
             }
             ReflectionTools.addToField(obj, field, index, true, cls);
+
             try {
                 Object v = ReflectionTools.getValue(obj, field, index);
                 if (v instanceof ASMSource) {
                     ASMSource asv = (ASMSource) v;
                     asv.setSourceTag(editedTag);
                 }
+
+                //Hack to set CLIPACTIONRECORD parent
+                if ((obj instanceof CLIPACTIONS) && (v instanceof CLIPACTIONRECORD)) {
+                    ((CLIPACTIONRECORD) v).setParentClipActions((CLIPACTIONS) obj);
+                }
+
             } catch (IllegalArgumentException | IllegalAccessException ex) {
                 //ignore
             }

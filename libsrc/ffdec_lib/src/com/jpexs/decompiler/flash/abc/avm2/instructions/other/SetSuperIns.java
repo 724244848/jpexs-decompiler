@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.flash.abc.avm2.instructions.other;
 
 import com.jpexs.decompiler.flash.abc.ABC;
@@ -50,9 +51,11 @@ public class SetSuperIns extends InstructionDefinition implements SetTypeIns {
         int multinameIndex = ins.operands[0];
 
         GraphTargetItem value = stack.pop();
+
         FullMultinameAVM2Item multiname = resolveMultiname(localData, true, stack, localData.getConstants(), multinameIndex, ins);
         GraphTargetItem obj = stack.pop();
-        output.add(new SetSuperAVM2Item(ins, localData.lineStartInstruction, value, obj, multiname));
+        GraphTargetItem result = new SetSuperAVM2Item(ins, localData.lineStartInstruction, value, obj, multiname);
+        SetTypeIns.handleResult(value, stack, output, localData, result, -1);
     }
 
     @Override
@@ -61,13 +64,4 @@ public class SetSuperIns extends InstructionDefinition implements SetTypeIns {
         return 2 + getMultinameRequiredStackSize(abc.constants, multinameIndex);
     }
 
-    @Override
-    public String getObject(Stack<AVM2Item> stack, ABC abc, AVM2Instruction ins, List<AVM2Item> output, MethodBody body, HashMap<Integer, String> localRegNames, List<DottedChain> fullyQualifiedNames) throws InterruptedException {
-        int multinameIndex = ins.operands[0];
-        String multiname = resolveMultinameNoPop(1, stack, abc.constants, multinameIndex, ins, fullyQualifiedNames);
-        HighlightedTextWriter writer = new HighlightedTextWriter(Configuration.getCodeFormatting(), false);
-        stack.get(1 + resolvedCount(abc.constants, multinameIndex)).toString(writer, LocalData.create(abc.constants, localRegNames, fullyQualifiedNames));
-        String obj = writer.toString();
-        return obj + ".super." + multiname;
-    }
 }

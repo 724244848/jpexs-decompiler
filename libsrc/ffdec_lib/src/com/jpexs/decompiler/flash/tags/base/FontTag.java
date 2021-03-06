@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,6 +32,7 @@ import com.jpexs.decompiler.flash.types.SHAPE;
 import com.jpexs.decompiler.flash.types.TEXTRECORD;
 import com.jpexs.decompiler.flash.types.shaperecords.SHAPERECORD;
 import com.jpexs.helpers.ByteArrayRange;
+import com.jpexs.helpers.Reference;
 import com.jpexs.helpers.SerializableImage;
 import java.awt.Color;
 import java.awt.Font;
@@ -41,8 +42,12 @@ import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphMetrics;
 import java.awt.font.GlyphVector;
 import java.awt.geom.Area;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -80,6 +85,8 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
 
     public abstract String getFontNameIntag();
 
+    public abstract void setFontNameIntag(String name);
+
     public abstract boolean isSmall();
 
     public abstract boolean isBold();
@@ -91,6 +98,14 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
     public abstract boolean isBoldEditable();
 
     public abstract boolean isItalicEditable();
+
+    public abstract boolean isFontNameInTagEditable();
+
+    public abstract boolean isAscentEditable();
+
+    public abstract boolean isDescentEditable();
+
+    public abstract boolean isLeadingEditable();
 
     public abstract void setSmall(boolean value);
 
@@ -105,6 +120,14 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
     public abstract int getDescent();
 
     public abstract int getLeading();
+
+    public abstract void setAscent(int ascent);
+
+    public abstract void setDescent(int descent);
+
+    public abstract void setLeading(int leading);
+
+    public abstract void setHasLayout(boolean hasLayout);
 
     public String getFontName() {
         DefineFontNameTag fontNameTag = getFontNameTag();
@@ -124,11 +147,20 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
 
     private static Map<String, Map<String, Font>> installedFontsByFamily;
 
+    private static Map<String, Map<String, File>> installedFontFilesByFamily;
+
     private static Map<String, Font> installedFontsByName;
+
+    private static Map<Font, File> customFontToFile;
 
     private static String defaultFontName;
 
     private static boolean firstLoaded = false;
+
+    private static Map<String, Map<String, Map<Integer, List<FontHelper.KerningPair>>>> installedFontKerningPairsByFamily;
+
+    private static Map<Font, Map<Integer, List<FontHelper.KerningPair>>> customFontKerningPairs;
+
 
     private static void ensureLoaded() {
         if (!firstLoaded) {
@@ -270,9 +302,52 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
         return defaultFontName;
     }
 
+    protected static List<FontHelper.KerningPair> getFontKerningPairs(Font font, int size) {
+        if (customFontToFile.containsKey(font)) {
+            if (!customFontKerningPairs.containsKey(font) || !customFontKerningPairs.get(font).containsKey(size)) {
+                if (!customFontKerningPairs.containsKey(font)) {
+                    customFontKerningPairs.put(font, new HashMap<>());
+                }
+                customFontKerningPairs.get(font).put(size, FontHelper.getFontKerningPairs(customFontToFile.get(font), size));
+            }
+            return customFontKerningPairs.get(font).get(size);
+        }
+        if (installedFontKerningPairsByFamily.containsKey(font.getFamily(Locale.ENGLISH))
+                && installedFontKerningPairsByFamily.get(font.getFamily()).containsKey(font.getFontName(Locale.ENGLISH))
+                && installedFontKerningPairsByFamily.get(font.getFamily()).get(font.getFontName(Locale.ENGLISH)).containsKey(size)) {
+            return installedFontKerningPairsByFamily.get(font.getFamily()).get(font.getFontName(Locale.ENGLISH)).get(size);
+        }
+
+        if (installedFontFilesByFamily.containsKey(font.getFamily(Locale.ENGLISH)) && installedFontFilesByFamily.get(font.getFamily()).containsKey(font.getFontName(Locale.ENGLISH))) {
+            File file = installedFontFilesByFamily.get(font.getFamily(Locale.ENGLISH)).get(font.getFontName(Locale.ENGLISH));
+            if (!installedFontKerningPairsByFamily.containsKey(font.getFamily(Locale.ENGLISH))) {
+                installedFontKerningPairsByFamily.put(font.getFamily(Locale.ENGLISH), new HashMap<>());
+            }
+            if (!installedFontKerningPairsByFamily.get(font.getFamily(Locale.ENGLISH)).containsKey(font.getFontName(Locale.ENGLISH))) {
+                installedFontKerningPairsByFamily.get(font.getFamily(Locale.ENGLISH)).put(font.getFontName(Locale.ENGLISH), new HashMap<>());
+            }
+
+            installedFontKerningPairsByFamily.get(font.getFamily(Locale.ENGLISH)).get(font.getFontName(Locale.ENGLISH)).put(size, FontHelper.getFontKerningPairs(file, size));
+        }
+        if (installedFontKerningPairsByFamily.containsKey(font.getFamily(Locale.ENGLISH))
+                && installedFontKerningPairsByFamily.get(font.getFamily()).containsKey(font.getFontName(Locale.ENGLISH))
+                && installedFontKerningPairsByFamily.get(font.getFamily()).get(font.getFontName(Locale.ENGLISH)).containsKey(size)) {
+            return installedFontKerningPairsByFamily.get(font.getFamily()).get(font.getFontName(Locale.ENGLISH)).get(size);
+        }
+        return new ArrayList<>();
+    }
+
+    public static void addCustomFont(Font font, File file) {
+        customFontToFile.put(font, file);
+    }
+
     public static void reload() {
+        installedFontKerningPairsByFamily = new HashMap<>();
         installedFontsByFamily = FontHelper.getInstalledFonts();
+        installedFontFilesByFamily = FontHelper.getInstalledFontFiles();
         installedFontsByName = new HashMap<>();
+        customFontToFile = new HashMap<>();
+        customFontKerningPairs = new HashMap<>();
 
         for (String fam : installedFontsByFamily.keySet()) {
             for (String nam : installedFontsByFamily.get(fam).keySet()) {
@@ -301,7 +376,6 @@ public abstract class FontTag extends DrawableTag implements AloneTag {
             return "Arial";
         }
 
-        //First font
         return installedFontsByFamily.keySet().iterator().next();
     }
 

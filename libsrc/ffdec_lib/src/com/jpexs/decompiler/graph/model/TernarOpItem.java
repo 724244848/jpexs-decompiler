@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -12,7 +12,8 @@
  * Lesser General Public License for more details.
  * 
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library. */
+ * License along with this library.
+ */
 package com.jpexs.decompiler.graph.model;
 
 import com.jpexs.decompiler.flash.SourceGeneratorLocalData;
@@ -20,6 +21,7 @@ import com.jpexs.decompiler.flash.helpers.GraphTextWriter;
 import com.jpexs.decompiler.graph.CompilationException;
 import com.jpexs.decompiler.graph.GraphSourceItem;
 import com.jpexs.decompiler.graph.GraphTargetItem;
+import com.jpexs.decompiler.graph.GraphTargetVisitorInterface;
 import com.jpexs.decompiler.graph.SourceGenerator;
 import java.util.List;
 
@@ -43,12 +45,38 @@ public class TernarOpItem extends GraphTargetItem {
     }
 
     @Override
+    public void visit(GraphTargetVisitorInterface visitor) {
+        visitor.visit(onTrue);
+        visitor.visit(onFalse);
+    }
+
+    @Override
     public GraphTextWriter appendTo(GraphTextWriter writer, LocalData localData) throws InterruptedException {
+        if (expression.getPrecedence() >= precedence){
+            writer.append("(");
+        }
         expression.toString(writer, localData);
-        writer.append("?");
+        if (expression.getPrecedence() >= precedence){
+            writer.append(")");
+        }
+        writer.append(" ? ");
+        
+        if (onTrue instanceof TernarOpItem){  //ternar in ternar better in parenthesis
+            writer.append("(");
+        }
         onTrue.toString(writer, localData);
-        writer.append(":");
+        if (onTrue instanceof TernarOpItem){
+            writer.append(")");
+        }                
+        writer.append(" : ");
+        if (onFalse instanceof TernarOpItem){ 
+             writer.append("(");
+        }
         onFalse.toString(writer, localData);
+        if (onFalse instanceof TernarOpItem){ 
+             writer.append(")");
+        }
+        
         return writer;
     }
 

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -110,6 +110,7 @@ import com.jpexs.decompiler.flash.types.RGB;
 import com.jpexs.decompiler.flash.types.RGBA;
 import com.jpexs.decompiler.flash.types.SHAPEWITHSTYLE;
 import com.jpexs.decompiler.flash.types.SOUNDENVELOPE;
+import com.jpexs.decompiler.flash.types.SOUNDINFO;
 import com.jpexs.decompiler.flash.types.TEXTRECORD;
 import com.jpexs.decompiler.flash.types.filters.BEVELFILTER;
 import com.jpexs.decompiler.flash.types.filters.BLURFILTER;
@@ -153,6 +154,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.transform.OutputKeys;
@@ -169,7 +172,6 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.DefaultHandler;
-import org.xml.sax.helpers.XMLReaderFactory;
 
 /**
  *
@@ -227,7 +229,18 @@ public class XFLConverter {
     private static void convertShapeEdges(int startX, int startY, MATRIX mat, List<SHAPERECORD> records, StringBuilder ret) {
         int x = startX;
         int y = startY;
-        ret.append("!").append(startX).append(" ").append(startY);
+        boolean hasMove = false;
+        if (!records.isEmpty()) {
+            if (records.get(0) instanceof StyleChangeRecord) {
+                StyleChangeRecord scr = (StyleChangeRecord) records.get(0);
+                if (scr.stateMoveTo) {
+                    hasMove = true;
+                }
+            }
+        }
+        if (!hasMove) {
+            ret.append("!").append(startX).append(" ").append(startY);
+        }
         for (SHAPERECORD rec : records) {
             convertShapeEdge(mat, rec, x, y, ret);
             x = rec.changeX(x);
@@ -714,8 +727,9 @@ public class XFLConverter {
         if (mat == null) {
             mat = new MATRIX();
         }
-        //TODO: insert some magic methods here to fix issue #1257
-        shapeRecords = smoothShape(shapeRecords);
+
+        //smoothing fixes some shapes in #503, but also breaks some shapes of #1257
+        //shapeRecords = smoothShape(shapeRecords);
         List<SHAPERECORD> edges = new ArrayList<>();
         int lineStyleCount = 0;
         int fillStyle0 = -1;
@@ -1505,8 +1519,52 @@ public class XFLConverter {
                             maxDepth = rec.placeDepth;
                         }
                     }
+
+                    DefineButtonSoundTag defineButtonSound = button.getSounds();
+                    int soundLayerOffset = 0;
+                    if (defineButtonSound != null) {
+                        soundLayerOffset = 1;
+                        symbolStr.writeStartElement("DOMLayer", new String[]{"name", "Layer 1"});
+                        symbolStr.writeStartElement("frames");
+                        for (int frame = 1; frame <= 4; frame++) {
+
+                            int soundChar = 0;
+                            SOUNDINFO soundInfo = null;
+                            switch (frame) {
+                                case 1:
+                                    soundChar = defineButtonSound.buttonSoundChar0;
+                                    soundInfo = defineButtonSound.buttonSoundInfo0;
+                                    break;
+                                case 2:
+                                    soundChar = defineButtonSound.buttonSoundChar1;
+                                    soundInfo = defineButtonSound.buttonSoundInfo1;
+                                    break;
+                                case 3:
+                                    soundChar = defineButtonSound.buttonSoundChar2;
+                                    soundInfo = defineButtonSound.buttonSoundInfo2;
+                                    break;
+                                case 4:
+                                    soundChar = defineButtonSound.buttonSoundChar3;
+                                    soundInfo = defineButtonSound.buttonSoundInfo3;
+                                    break;
+                            }
+                            symbolStr.writeStartElement("DOMFrame", new String[]{
+                                "index", Integer.toString(frame - 1),
+                                "keyMode", Integer.toString(KEY_MODE_NORMAL),});
+                            if (soundChar > 0) {
+                                DefineSoundTag sound = (DefineSoundTag) swf.getCharacter(soundChar);
+                                convertSoundUsage(symbolStr, sound, soundInfo);
+                            }
+                            symbolStr.writeStartElement("elements");
+                            symbolStr.writeEndElement(); //elements
+                            symbolStr.writeEndElement(); //DOMFrame
+                        }
+                        symbolStr.writeEndElement(); // frames
+                        symbolStr.writeEndElement(); // DOMLayer
+                    }
+
                     for (int i = maxDepth; i >= 1; i--) {
-                        symbolStr.writeStartElement("DOMLayer", new String[]{"name", "Layer " + (maxDepth - i + 1)});
+                        symbolStr.writeStartElement("DOMLayer", new String[]{"name", "Layer " + (maxDepth - i + 1 + soundLayerOffset)});
                         if (i == 1) {
                             symbolStr.writeAttribute("current", true);
                             symbolStr.writeAttribute("isSelected", true);
@@ -1514,21 +1572,10 @@ public class XFLConverter {
                         symbolStr.writeAttribute("color", randomOutlineColor());
                         symbolStr.writeStartElement("frames");
                         int lastFrame = 0;
-                        DefineButtonSoundTag sound = button.getSounds();
+
                         loopframes:
                         for (int frame = 1; frame <= 4; frame++) {
-                            if (sound != null) {
-                                switch (frame) {
-                                    case 1:
-                                        break;
-                                    case 2:
-                                        break;
-                                    case 3:
-                                        break;
-                                    case 4:
-                                        break;
-                                }
-                            }
+
                             for (BUTTONRECORD rec : records) {
                                 if (rec.placeDepth == i) {
                                     boolean ok = false;
@@ -2024,6 +2071,104 @@ public class XFLConverter {
         }
     }
 
+    private static void convertSoundUsage(XFLXmlWriter writer, DefineSoundTag sound, SOUNDINFO soundInfo) throws XMLStreamException {
+        String soundName = "sound" + sound.soundId + "." + sound.getExportFormat().toString().toLowerCase();
+        writer.writeAttribute("soundName", soundName);
+        if (soundInfo.hasInPoint) {
+            writer.writeAttribute("inPoint44", soundInfo.inPoint);
+        }
+        if (soundInfo.hasOutPoint) {
+            writer.writeAttribute("outPoint44", soundInfo.outPoint);
+        }
+        if (soundInfo.hasLoops) {
+            if (soundInfo.loopCount == 32767) {
+                writer.writeAttribute("soundLoopMode", "loop");
+            }
+            writer.writeAttribute("soundLoop", soundInfo.loopCount);
+        }
+
+        if (soundInfo.syncStop) {
+            writer.writeAttribute("soundSync", "stop");
+        } else if (soundInfo.syncNoMultiple) {
+            writer.writeAttribute("soundSync", "start");
+        }
+
+        if (soundInfo.hasEnvelope) {
+            SOUNDENVELOPE[] envelopeRecords = soundInfo.envelopeRecords;
+
+            long soundLength44 = 0;
+            switch (sound.soundRate) {
+                case 0: //5.5kHz
+                    soundLength44 = 8 * sound.soundSampleCount;
+                    break;
+                case 1: //11kHz
+                    soundLength44 = 4 * sound.soundSampleCount;
+                    break;
+                case 2: //22kHz
+                    soundLength44 = 2 * sound.soundSampleCount;
+                    break;
+                case 3: //44kHz
+                    soundLength44 = sound.soundSampleCount;
+                    break;
+
+            }
+            if (envelopeRecords.length == 1
+                    && envelopeRecords[0].leftLevel == 32768
+                    && envelopeRecords[0].pos44 == 0
+                    && envelopeRecords[0].rightLevel == 0) {
+                writer.writeAttribute("soundEffect", "left channel");
+            } else if (envelopeRecords.length == 1
+                    && envelopeRecords[0].leftLevel == 0
+                    && envelopeRecords[0].pos44 == 0
+                    && envelopeRecords[0].rightLevel == 32768) {
+                writer.writeAttribute("soundEffect", "right channel");
+            } else if (envelopeRecords.length == 2
+                    && envelopeRecords[0].leftLevel == 32768
+                    && envelopeRecords[0].pos44 == 0
+                    && envelopeRecords[0].rightLevel == 0
+                    && envelopeRecords[1].leftLevel == 0
+                    && envelopeRecords[1].pos44 == soundLength44
+                    && envelopeRecords[1].rightLevel == 32768) {
+                writer.writeAttribute("soundEffect", "fade left to right");
+            } else if (envelopeRecords.length == 2
+                    && envelopeRecords[0].leftLevel == 0
+                    && envelopeRecords[0].pos44 == 0
+                    && envelopeRecords[0].rightLevel == 32768
+                    && envelopeRecords[1].leftLevel == 32768
+                    && envelopeRecords[1].pos44 == soundLength44
+                    && envelopeRecords[1].rightLevel == 0) {
+                writer.writeAttribute("soundEffect", "fade right to left");
+            } else if (envelopeRecords.length == 2
+                    && envelopeRecords[0].leftLevel == 0
+                    && envelopeRecords[0].pos44 == 0
+                    && envelopeRecords[0].rightLevel == 0
+                    && envelopeRecords[1].leftLevel == 32768
+                    && envelopeRecords[1].pos44 == soundLength44 / 4
+                    && envelopeRecords[1].rightLevel == 0) {
+                writer.writeAttribute("soundEffect", "fade in");
+            } else if (envelopeRecords.length == 2
+                    && envelopeRecords[0].leftLevel == 32768
+                    && envelopeRecords[0].pos44 == soundLength44 * 3 / 4
+                    && envelopeRecords[0].rightLevel == 32768
+                    && envelopeRecords[1].leftLevel == 0
+                    && envelopeRecords[1].pos44 == soundLength44
+                    && envelopeRecords[1].rightLevel == 0) {
+                writer.writeAttribute("soundEffect", "fade out");
+            } else {
+                writer.writeAttribute("soundEffect", "custom");
+            }
+
+            writer.writeStartElement("SoundEnvelope");
+            for (SOUNDENVELOPE env : envelopeRecords) {
+                writer.writeEmptyElement("SoundEnvelopePoint", new String[]{"mark44", Long.toString(env.pos44), "level0", Integer.toString(env.leftLevel), "level1", Integer.toString(env.rightLevel)});
+            }
+            writer.writeEndElement(); // SoundEnvelope
+        } else {
+            writer.writeStartElement("SoundEnvelope");
+            writer.writeEmptyElement("SoundEnvelopePoint", new String[]{"level0", "32768", "level1", "32768"});
+            writer.writeEndElement(); // SoundEnvelope
+        }
+    }
     private static void convertFrame(boolean shapeTween, SoundStreamHeadTypeTag soundStreamHead, StartSoundTag startSound, int frame, int duration, String actionScript, String elements, HashMap<String, byte[]> files, XFLXmlWriter writer) throws XMLStreamException {
         DefineSoundTag sound = null;
         if (startSound != null) {
@@ -2042,81 +2187,18 @@ public class XFLConverter {
         } else {
             writer.writeAttribute("keyMode", KEY_MODE_NORMAL);
         }
-        XFLXmlWriter soundEnvelopeStr = new XFLXmlWriter();
         if (soundStreamHead != null && startSound == null) {
             String soundName = "sound" + soundStreamHead.getCharacterId() + "." + soundStreamHead.getExportFormat().toString().toLowerCase();
             writer.writeAttribute("soundName", soundName);
             writer.writeAttribute("soundSync", "stream");
-            soundEnvelopeStr.writeStartElement("SoundEnvelope");
-            soundEnvelopeStr.writeEmptyElement("SoundEnvelopePoint", new String[]{"level0", "32768", "level1", "32768"});
-            soundEnvelopeStr.writeEndElement();
+            writer.writeStartElement("SoundEnvelope");
+            writer.writeEmptyElement("SoundEnvelopePoint", new String[]{"level0", "32768", "level1", "32768"});
+            writer.writeEndElement();
         }
         if (startSound != null && sound != null) {
-            String soundName = "sound" + sound.soundId + "." + sound.getExportFormat().toString().toLowerCase();
-            writer.writeAttribute("soundName", soundName);
-            if (startSound.soundInfo.hasInPoint) {
-                writer.writeAttribute("inPoint44", startSound.soundInfo.inPoint);
-            }
-            if (startSound.soundInfo.hasOutPoint) {
-                writer.writeAttribute("outPoint44", startSound.soundInfo.outPoint);
-            }
-            if (startSound.soundInfo.hasLoops) {
-                if (startSound.soundInfo.loopCount == 32767) {
-                    writer.writeAttribute("soundLoopMode", "loop");
-                }
-                writer.writeAttribute("soundLoop", startSound.soundInfo.loopCount);
-            }
-
-            if (startSound.soundInfo.syncStop) {
-                writer.writeAttribute("soundSync", "stop");
-            } else if (startSound.soundInfo.syncNoMultiple) {
-                writer.writeAttribute("soundSync", "start");
-            }
-            soundEnvelopeStr.writeStartElement("SoundEnvelope");
-            if (startSound.soundInfo.hasEnvelope) {
-                SOUNDENVELOPE[] envelopeRecords = startSound.soundInfo.envelopeRecords;
-                for (SOUNDENVELOPE env : envelopeRecords) {
-                    soundEnvelopeStr.writeEmptyElement("SoundEnvelopePoint", new String[]{"mark44", Long.toString(env.pos44), "level0", Integer.toString(env.leftLevel), "level1", Integer.toString(env.rightLevel)});
-                }
-
-                if (envelopeRecords.length == 1
-                        && envelopeRecords[0].leftLevel == 32768
-                        && envelopeRecords[0].pos44 == 0
-                        && envelopeRecords[0].rightLevel == 0) {
-                    writer.writeAttribute("soundEffect", "left channel");
-                } else if (envelopeRecords.length == 1
-                        && envelopeRecords[0].leftLevel == 0
-                        && envelopeRecords[0].pos44 == 0
-                        && envelopeRecords[0].rightLevel == 32768) {
-                    writer.writeAttribute("soundEffect", "right channel");
-                } else if (envelopeRecords.length == 2
-                        && envelopeRecords[0].leftLevel == 32768
-                        && envelopeRecords[0].pos44 == 0
-                        && envelopeRecords[0].rightLevel == 0
-                        && envelopeRecords[1].leftLevel == 0
-                        && envelopeRecords[1].pos44 == sound.soundSampleCount
-                        && envelopeRecords[1].rightLevel == 32768) {
-                    writer.writeAttribute("soundEffect", "fade left to right");
-                } else if (envelopeRecords.length == 2
-                        && envelopeRecords[0].leftLevel == 0
-                        && envelopeRecords[0].pos44 == 0
-                        && envelopeRecords[0].rightLevel == 32768
-                        && envelopeRecords[1].leftLevel == 32768
-                        && envelopeRecords[1].pos44 == sound.soundSampleCount
-                        && envelopeRecords[1].rightLevel == 0) {
-                    writer.writeAttribute("soundEffect", "fade right to left");
-                } else {
-                    writer.writeAttribute("soundEffect", "custom");
-                }
-                //TODO: fade in, fade out
-
-            } else {
-                soundEnvelopeStr.writeEmptyElement("SoundEnvelopePoint", new String[]{"level0", "32768", "level1", "32768"});
-            }
-            soundEnvelopeStr.writeEndElement(); // SoundEnvelope
+            convertSoundUsage(writer, sound, startSound.soundInfo);
         }
 
-        writer.writeCharactersRaw(soundEnvelopeStr.toString());
         if (!actionScript.isEmpty()) {
             writer.writeStartElement("Actionscript");
             writer.writeStartElement("script");
@@ -2454,7 +2536,7 @@ public class XFLConverter {
             MethodBody constructorBody = abc.findBody(constructorMethodIndex);
             try {
                 if (constructorBody.convertedItems == null) {
-                    constructorBody.convert(new ConvertData(), "??", ScriptExportMode.AS, true, constructorMethodIndex, pack.scriptIndex, classIndex, abc, null, new ScopeStack(), GraphTextWriter.TRAIT_INSTANCE_INITIALIZER, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true);
+                    constructorBody.convert(new ConvertData(), "??", ScriptExportMode.AS, true, constructorMethodIndex, pack.scriptIndex, classIndex, abc, null, new ScopeStack(), GraphTextWriter.TRAIT_INSTANCE_INITIALIZER, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true, new HashSet<>());
                 }
 
                 Map<Integer, Integer> frameToTraitMultiname = new HashMap<>();
@@ -2517,9 +2599,9 @@ public class XFLConverter {
                         MethodBody frameBody = abc.findBody(methodIndex);
 
                         StringBuilder scriptBuilder = new StringBuilder();
-                        frameBody.convert(new ConvertData(), "??", ScriptExportMode.AS, false, methodIndex, pack.scriptIndex, classIndex, abc, methodTrait, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true);
+                        frameBody.convert(new ConvertData(), "??", ScriptExportMode.AS, false, methodIndex, pack.scriptIndex, classIndex, abc, methodTrait, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true, new HashSet<>());
                         StringBuilderTextWriter writer = new StringBuilderTextWriter(Configuration.getCodeFormatting(), scriptBuilder);
-                        frameBody.toString("??", ScriptExportMode.AS, abc, methodTrait, writer, new ArrayList<>());
+                        frameBody.toString("??", ScriptExportMode.AS, abc, methodTrait, writer, new ArrayList<>(), new HashSet<>());
 
                         String script = scriptBuilder.toString();
                         ret.put(frame, script);
@@ -3840,7 +3922,8 @@ public class XFLConverter {
         XMLReader parser;
         try {
             SAXParserFactory factory = SAXParserFactory.newInstance();
-            parser = XMLReaderFactory.createXMLReader();
+            SAXParser sparser = factory.newSAXParser();
+            parser = sparser.getXMLReader();
             parser.setContentHandler(tparser);
             parser.setErrorHandler(tparser);
             html = "<?xml version=\"1.0\"?>\n"
@@ -3853,7 +3936,7 @@ public class XFLConverter {
                 System.out.println(html);
                 System.err.println(tparser.result);
             }
-        } catch (SAXException | IOException e) {
+        } catch (SAXException | IOException | ParserConfigurationException e) {
             logger.log(Level.SEVERE, "Error while converting HTML", e);
         }
         return tparser.result.toString();

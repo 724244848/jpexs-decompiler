@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -682,6 +682,18 @@ public class TagTree extends JTree {
         }
 
         return sb.toString();
+    }
+
+    public void setExpandPathString(String pathStr) {
+        if (pathStr != null && pathStr.length() > 0) {
+            String[] path = pathStr.split("\\|");
+
+            TreePath tp = View.getTreePathByPathStrings(this, Arrays.asList(path));
+            if (tp != null) {
+                // the current view is the Resources view, otherwise tp is null
+                mainPanel.tagTree.expandPath(tp.getParentPath());
+            }
+        }
     }
 
     public void setSelectionPathString(String pathStr) {

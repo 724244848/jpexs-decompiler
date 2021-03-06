@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -36,6 +36,7 @@ import com.jpexs.decompiler.flash.abc.avm2.model.StringAVM2Item;
 import com.jpexs.decompiler.flash.abc.types.ConvertData;
 import com.jpexs.decompiler.flash.abc.types.MethodBody;
 import com.jpexs.decompiler.flash.abc.types.Multiname;
+import com.jpexs.decompiler.flash.abc.types.ScriptInfo;
 import com.jpexs.decompiler.flash.abc.types.traits.Trait;
 import com.jpexs.decompiler.flash.abc.types.traits.TraitClass;
 import com.jpexs.decompiler.flash.abc.types.traits.TraitMethodGetterSetter;
@@ -93,6 +94,8 @@ import com.jpexs.decompiler.flash.tags.DebugIDTag;
 import com.jpexs.decompiler.flash.tags.DefineBinaryDataTag;
 import com.jpexs.decompiler.flash.tags.DefineSoundTag;
 import com.jpexs.decompiler.flash.tags.DefineSpriteTag;
+import com.jpexs.decompiler.flash.tags.DoABC2Tag;
+import com.jpexs.decompiler.flash.tags.DoABCTag;
 import com.jpexs.decompiler.flash.tags.DoInitActionTag;
 import com.jpexs.decompiler.flash.tags.EnableDebugger2Tag;
 import com.jpexs.decompiler.flash.tags.EnableDebuggerTag;
@@ -184,6 +187,7 @@ import java.util.Date;
 import java.util.EmptyStackException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -203,8 +207,6 @@ import java.util.zip.InflaterInputStream;
  */
 public final class SWF implements SWFContainerItem, Timelined {
 
-    // big object for testing cleanup
-    //BigObject bigObj = new BigObject();
     /**
      * Default version of SWF file format
      */
@@ -347,6 +349,12 @@ public final class SWF implements SWFContainerItem, Timelined {
     @Internal
     public final AS3Cache as3Cache = new AS3Cache();
 
+    @Internal
+    private Map<String, ASMSource> asmsCacheExportFilenames;
+
+    @Internal
+    private Map<String, ASMSource> asmsCache;
+
     private static final DecompilerPool decompilerPool = new DecompilerPool();
 
     public static final String AS2_PKG_PREFIX = "__Packages.";
@@ -374,6 +382,7 @@ public final class SWF implements SWFContainerItem, Timelined {
                 DefineSpriteTag spriteTag = (DefineSpriteTag) tag;
                 for (Tag tag1 : spriteTag.getTags()) {
                     tag1.setSwf(null);
+                    tag1.setTimelined(null);
                 }
 
                 for (int i = spriteTag.getTags().size() - 1; i >= 0; i--) {
@@ -389,10 +398,15 @@ public final class SWF implements SWFContainerItem, Timelined {
             }
 
             tag.setSwf(null);
+            tag.setTimelined(null);
         }
 
         tags.clear();
         if (abcList != null) {
+
+            for (ABCContainerTag c : abcList) {
+                c.getABC().free();
+            }
             abcList.clear();
         }
 
@@ -400,8 +414,7 @@ public final class SWF implements SWFContainerItem, Timelined {
             swfList.swfs.clear();
         }
 
-        as2Cache.clear();
-        as3Cache.clear();
+        clearScriptCache();
         frameCache.clear();
         soundCache.clear();
 
@@ -1621,7 +1634,7 @@ public final class SWF implements SWFContainerItem, Timelined {
         for (ScriptPack item : packs) {
             ClassPath key = item.getClassPath();
             if (classPaths.contains(key)) {
-                logger.log(Level.SEVERE, "Duplicate pack path found (" + key + ")!");
+                logger.log(Level.SEVERE, "Duplicate pack path found ({0})!", key);
             } else {
                 classPaths.add(key);
                 ret.add(item);
@@ -1702,11 +1715,25 @@ public final class SWF implements SWFContainerItem, Timelined {
     }
 
     public Map<String, ASMSource> getASMs(boolean exportFileNames, List<TreeItem> nodesToExport, boolean exportAll) {
-        Map<String, ASMSource> asmsToExport = new HashMap<>();
+        if (exportAll) {
+            if (exportFileNames && asmsCacheExportFilenames != null) {
+                return asmsCacheExportFilenames;
+            }
+            if (!exportFileNames && asmsCache != null) {
+                return asmsCache;
+            }
+        }
+        Map<String, ASMSource> asmsToExport = new LinkedHashMap<>();
         for (TreeItem treeItem : getFirstLevelASMNodes(null)) {
             getASMs(exportFileNames, treeItem, nodesToExport, exportAll, asmsToExport, File.separator + getASMPath(exportFileNames, treeItem));
         }
-
+        if (exportAll) {
+            if (exportFileNames) {
+                asmsCacheExportFilenames = asmsToExport;
+            } else {
+                asmsCache = asmsToExport;
+            }
+        }
         return asmsToExport;
     }
 
@@ -1790,6 +1817,15 @@ public final class SWF implements SWFContainerItem, Timelined {
         List<TreeItem> subFrames = new ArrayList<>();
         subNodes.addAll(timeline.getAS2RootPackage().subPackages.values());
         subNodes.addAll(timeline.getAS2RootPackage().scripts.values());
+
+        for (ASMSource ass : timeline.asmSources) {
+            if (ass instanceof DoInitActionTag) {
+                String exportName = getExportName(((DoInitActionTag) ass).spriteId);
+                if (exportName == null) {
+                    subNodes.add(ass);
+                }
+            }
+        }
 
         for (Tag tag : timeline.otherTags) {
             boolean hasInnerFrames = false;
@@ -2557,6 +2593,13 @@ public final class SWF implements SWFContainerItem, Timelined {
     public void clearScriptCache() {
         as2Cache.clear();
         as3Cache.clear();
+        if (abcList != null) {
+            for (ABCContainerTag c : abcList) {
+                c.getABC().clearPacksCache();
+            }
+        }
+        asmsCache = null;
+        asmsCacheExportFilenames = null;
         IdentifiersDeobfuscation.clearCache();
     }
 
@@ -2985,20 +3028,23 @@ public final class SWF implements SWFContainerItem, Timelined {
     }
 
     private void removeTagInternal(Timelined timelined, Tag tag, boolean removeDependencies) {
+        if ((tag instanceof DoABC2Tag) || (tag instanceof DoABCTag)) {
+            clearAbcListCache();
+        }
         if (tag instanceof ShowFrameTag || ShowFrameTag.isNestedTagType(tag.getId())) {
             timelined.removeTag(tag);
             timelined.setModified(true);
             timelined.resetTimeline();
         } else // timeline should be always the swf here
-         if (removeDependencies) {
-                removeTagWithDependenciesFromTimeline(tag, timelined.getTimeline());
+        if (removeDependencies) {
+            removeTagWithDependenciesFromTimeline(tag, timelined.getTimeline());
+            timelined.setModified(true);
+        } else {
+            boolean modified = removeTagFromTimeline(tag, timelined.getTimeline());
+            if (modified) {
                 timelined.setModified(true);
-            } else {
-                boolean modified = removeTagFromTimeline(tag, timelined.getTimeline());
-                if (modified) {
-                    timelined.setModified(true);
-                }
             }
+        }
     }
 
     @Override
@@ -3123,6 +3169,9 @@ public final class SWF implements SWFContainerItem, Timelined {
         if (timelined instanceof DefineSpriteTag) {
             DefineSpriteTag sprite = (DefineSpriteTag) timelined;
             sprite.frameCount = timelined.getTimeline().getFrameCount();
+        }
+        if (timelined == this) {
+            frameCount = getTimeline().getFrameCount();
         }
     }
 
@@ -3636,7 +3685,7 @@ public final class SWF implements SWFContainerItem, Timelined {
 
                                 int mi = ((TraitMethodGetterSetter) t).method_info;
                                 try {
-                                    documentPack.abc.findBody(mi).convert(new ConvertData(), "??", ScriptExportMode.AS, true, mi, documentPack.scriptIndex, cindex, documentPack.abc, t, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true);
+                                    documentPack.abc.findBody(mi).convert(new ConvertData(), "??", ScriptExportMode.AS, true, mi, documentPack.scriptIndex, cindex, documentPack.abc, t, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true, new HashSet<>());
                                     List<GraphTargetItem> infos = documentPack.abc.findBody(mi).convertedItems;
                                     if (!infos.isEmpty()) {
                                         if (infos.get(0) instanceof IfItem) {
@@ -3712,7 +3761,7 @@ public final class SWF implements SWFContainerItem, Timelined {
                                                                         if (tr instanceof TraitClass) {
                                                                             int ci = ((TraitClass) tr).class_info;
                                                                             int cinit = p.abc.class_info.get(ci).cinit_index;
-                                                                            p.abc.findBody(cinit).convert(new ConvertData(), "??", ScriptExportMode.AS, true, cinit, p.scriptIndex, cindex, p.abc, t, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true);
+                                                                            p.abc.findBody(cinit).convert(new ConvertData(), "??", ScriptExportMode.AS, true, cinit, p.scriptIndex, cindex, p.abc, t, new ScopeStack(), 0, new NulWriter(), new ArrayList<>(), new ArrayList<>(), true, new HashSet<>());
                                                                             List<GraphTargetItem> cinitBody = p.abc.findBody(cinit).convertedItems;
                                                                             for (GraphTargetItem cit : cinitBody) {
                                                                                 if (cit instanceof SetPropertyAVM2Item) {

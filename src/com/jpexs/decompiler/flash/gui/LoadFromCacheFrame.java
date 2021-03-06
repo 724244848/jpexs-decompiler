@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -105,7 +105,7 @@ public class LoadFromCacheFrame extends AppFrame {
         });
         cnt.setLayout(new BorderLayout());
         cnt.add(searchField, BorderLayout.NORTH);
-        cnt.add(new JScrollPane(list), BorderLayout.CENTER);
+        cnt.add(new FasterScrollPane(list), BorderLayout.CENTER);
 
         JPanel bottomPanel = new JPanel();
         bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));

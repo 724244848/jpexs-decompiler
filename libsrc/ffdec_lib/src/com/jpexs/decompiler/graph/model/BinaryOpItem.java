@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,7 @@ import com.jpexs.decompiler.graph.GraphPart;
 import com.jpexs.decompiler.graph.GraphSourceItem;
 import com.jpexs.decompiler.graph.GraphSourceItemPos;
 import com.jpexs.decompiler.graph.GraphTargetItem;
-import java.util.ArrayList;
+import com.jpexs.decompiler.graph.GraphTargetVisitorInterface;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -208,10 +208,8 @@ public abstract class BinaryOpItem extends GraphTargetItem implements BinaryOp {
     }
 
     @Override
-    public List<GraphTargetItem> getAllSubItems() {
-        List<GraphTargetItem> ret = new ArrayList<>();
-        ret.add(getLeftSide());
-        ret.add(getRightSide());
-        return ret;
+    public void visit(GraphTargetVisitorInterface visitor) {
+        visitor.visit(getLeftSide());
+        visitor.visit(getRightSide());
     }
 }

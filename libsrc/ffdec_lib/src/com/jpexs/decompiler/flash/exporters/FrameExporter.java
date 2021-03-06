@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,7 @@ import com.jpexs.decompiler.flash.configuration.Configuration;
 import com.jpexs.decompiler.flash.exporters.commonshape.ExportRectangle;
 import com.jpexs.decompiler.flash.exporters.commonshape.Matrix;
 import com.jpexs.decompiler.flash.exporters.commonshape.SVGExporter;
+import com.jpexs.decompiler.flash.exporters.modes.FontExportMode;
 import com.jpexs.decompiler.flash.exporters.modes.FrameExportMode;
 import com.jpexs.decompiler.flash.exporters.settings.ButtonExportSettings;
 import com.jpexs.decompiler.flash.exporters.settings.FrameExportSettings;
@@ -33,19 +34,27 @@ import com.jpexs.decompiler.flash.exporters.settings.SpriteExportSettings;
 import com.jpexs.decompiler.flash.exporters.shape.CanvasShapeExporter;
 import com.jpexs.decompiler.flash.helpers.BMPFile;
 import com.jpexs.decompiler.flash.helpers.ImageHelper;
+import com.jpexs.decompiler.flash.tags.DefineEditTextTag;
 import com.jpexs.decompiler.flash.tags.DefineSpriteTag;
 import com.jpexs.decompiler.flash.tags.SetBackgroundColorTag;
 import com.jpexs.decompiler.flash.tags.Tag;
 import com.jpexs.decompiler.flash.tags.base.CharacterTag;
+import com.jpexs.decompiler.flash.tags.base.DrawableTag;
+import com.jpexs.decompiler.flash.tags.base.FontTag;
+import com.jpexs.decompiler.flash.tags.base.StaticTextTag;
+import com.jpexs.decompiler.flash.tags.base.TextTag;
 import com.jpexs.decompiler.flash.tags.enums.ImageFormat;
 import com.jpexs.decompiler.flash.timeline.DepthState;
 import com.jpexs.decompiler.flash.timeline.Frame;
 import com.jpexs.decompiler.flash.timeline.Timeline;
 import com.jpexs.decompiler.flash.timeline.Timelined;
 import com.jpexs.decompiler.flash.types.ColorTransform;
+import com.jpexs.decompiler.flash.types.DynamicTextGlyphEntry;
+import com.jpexs.decompiler.flash.types.GLYPHENTRY;
 import com.jpexs.decompiler.flash.types.RECT;
 import com.jpexs.decompiler.flash.types.RGB;
 import com.jpexs.decompiler.flash.types.RGBA;
+import com.jpexs.decompiler.flash.types.TEXTRECORD;
 import com.jpexs.decompiler.flash.types.filters.BEVELFILTER;
 import com.jpexs.decompiler.flash.types.filters.COLORMATRIXFILTER;
 import com.jpexs.decompiler.flash.types.filters.CONVOLUTIONFILTER;
@@ -54,12 +63,17 @@ import com.jpexs.decompiler.flash.types.filters.FILTER;
 import com.jpexs.decompiler.flash.types.filters.GLOWFILTER;
 import com.jpexs.decompiler.flash.types.filters.GRADIENTBEVELFILTER;
 import com.jpexs.decompiler.flash.types.filters.GRADIENTGLOWFILTER;
+import com.jpexs.decompiler.flash.types.shaperecords.SHAPERECORD;
 import com.jpexs.helpers.Helper;
 import com.jpexs.helpers.Path;
 import com.jpexs.helpers.utf8.Utf8Helper;
+import gnu.jpdf.PDFGraphics;
 import gnu.jpdf.PDFJob;
 import java.awt.Color;
+import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.print.PageFormat;
 import java.awt.print.Paper;
@@ -70,9 +84,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.logging.Level;
@@ -455,15 +471,34 @@ public class FrameExporter {
                         PageFormat pf = new PageFormat();
                         pf.setOrientation(PageFormat.PORTRAIT);
                         Paper p = new Paper();
-                        BufferedImage img0 = frameImages.next();
-                        p.setSize(img0.getWidth() + 10, img0.getHeight() + 10);
+                        BufferedImage img = frameImages.next();
+                        p.setSize(img.getWidth() + 10, img.getHeight() + 10);
                         pf.setPaper(p);
 
-                        for (int i = 0; frameImages.hasNext(); i++) {
-                            BufferedImage img = frameImages.next();
-                            Graphics g = job.getGraphics(pf);
+
+                        int pos = 0;
+                        RECT rect = tim.displayRect;
+                        double zoom = settings.zoom;
+                        Matrix m = new Matrix();
+                        m.translate(-rect.Xmin * zoom, -rect.Ymin * zoom);
+                        m.scale(zoom);
+                        Matrix transformation = m;
+                        Map<Integer, Font> existingFonts = new HashMap<>();
+
+                        while (true) {
+                            int fframe = fframes.get(pos);
+                            Graphics2D g = (Graphics2D) job.getGraphics(pf);
                             g.drawImage(img, 5, 5, img.getWidth(), img.getHeight(), null);
+
+                            printStringsToImage(existingFonts, g, fframe, swf, tim, transformation);
+
                             g.dispose();
+                            if (frameImages.hasNext()) {
+                                img = frameImages.next();
+                            } else {
+                                break;
+                            }
+                            pos++;
                         }
 
                         job.end();
@@ -481,6 +516,117 @@ public class FrameExporter {
         }
 
         return ret;
+    }
+
+    private static void printStringsToImage(Map<Integer, Font> existingFonts, Graphics2D g, int frame, SWF swf, Timeline tim, Matrix transformation) {
+        double unzoom = SWF.unitDivisor;
+        Matrix absoluteTransformation = transformation;
+
+        int maxDepth = tim.getMaxDepth();
+        int time = frame;
+        Frame frameObj = tim.getFrame(frame);
+        for (int i = 1; i <= maxDepth; i++) {
+            if (!frameObj.layers.containsKey(i)) {
+                continue;
+            }
+            DepthState layer = frameObj.layers.get(i);
+            if (!swf.getCharacters().containsKey(layer.characterId)) {
+                continue;
+            }
+            if (!layer.isVisible) {
+                continue;
+            }
+            CharacterTag character = swf.getCharacter(layer.characterId);
+            Matrix layerMatrix = new Matrix(layer.matrix);
+            Matrix absMat = absoluteTransformation.concatenate(layerMatrix);
+            if (character instanceof DrawableTag) {
+                printStringsDrawDrawable(existingFonts, g, swf, layerMatrix, transformation, absMat, time, layer.ratio, (DrawableTag) character, unzoom);
+            }
+        }
+    }
+
+    private static void printStringsDrawDrawable(Map<Integer, Font> existingFonts, Graphics2D g, SWF swf, Matrix layerMatrix, Matrix transformation, Matrix absMat, int time, int ratio, DrawableTag drawable, double unzoom) {
+        int drawableFrameCount = drawable.getNumFrames();
+        if (drawableFrameCount == 0) {
+            drawableFrameCount = 1;
+        }
+
+        Matrix mat = transformation.concatenate(layerMatrix);
+        int dframe = time % drawableFrameCount;
+
+        Matrix m = mat; //mat.preConcatenate(Matrix.getTranslateInstance(-rect.xMin, -rect.yMin));
+        if (drawable instanceof DefineSpriteTag) {
+            printStringsToImage(existingFonts, g, dframe, swf, ((Timelined) drawable).getTimeline(), m);
+        }
+        if (drawable instanceof TextTag) {
+            TextTag textTag = (TextTag) drawable;
+
+            List<TEXTRECORD> textRecords = new ArrayList<>();
+
+            if (textTag instanceof StaticTextTag) {
+                textRecords = ((StaticTextTag) textTag).textRecords;
+            } else if (textTag instanceof DefineEditTextTag) {
+                DefineEditTextTag editText = (DefineEditTextTag) textTag;
+                if (editText.hasText) {
+                    textRecords = editText.getTextRecords();
+                }
+            }
+
+            Matrix textMatrix = new Matrix(textTag.getTextMatrix());
+            
+            Matrix mat0 = mat.concatenate(textMatrix);
+            Matrix trans = mat0.preConcatenate(Matrix.getScaleInstance(1 / SWF.unitDivisor));
+            trans = trans.preConcatenate(Matrix.getTranslateInstance(5, 5));
+            FontTag font = null;
+            int textHeight = 12;
+            int x = 0;
+            int y = 0;
+            for (TEXTRECORD rec : textRecords) {
+                if (rec.styleFlagsHasFont) {
+                    font = swf.getFont(rec.fontId);
+                    textHeight = rec.textHeight;
+                }
+                if (rec.styleFlagsHasXOffset) {
+                    int offsetX = rec.xOffset;
+                    x = offsetX;
+                }
+                if (rec.styleFlagsHasYOffset) {
+                    int offsetY = rec.yOffset;
+                    y = offsetY;
+                }
+                StringBuilder text = new StringBuilder();
+                for (GLYPHENTRY entry : rec.glyphEntries) {
+                    if (entry.glyphIndex != -1) {
+                        char ch = font.glyphToChar(entry.glyphIndex);
+                        text.append(ch);
+                    } else if (entry instanceof DynamicTextGlyphEntry) {
+                        DynamicTextGlyphEntry dynamicEntry = (DynamicTextGlyphEntry) entry;
+                        text.append(dynamicEntry.character);
+                    }
+                }
+
+                PDFGraphics g2 = (PDFGraphics) g;
+                if (existingFonts.containsKey(rec.fontId)) {
+                    g2.setExistingTtfFont(existingFonts.get(rec.fontId).deriveFont((float) textHeight));
+                } else {
+                    FontExporter fe = new FontExporter();
+                    File tempFile;
+                    try {
+                        tempFile = File.createTempFile("ffdec_font_export_", ".ttf");
+                        fe.exportFont(font, FontExportMode.TTF, tempFile);
+                        Font f = new Font("/MYFONT" + rec.fontId, font.getFontStyle(), textHeight);
+                        existingFonts.put(rec.fontId, f);
+                        g2.setTtfFont(f, tempFile);
+                    } catch (IOException ex) {
+                        Logger.getLogger(FrameExporter.class.getName()).log(Level.SEVERE, null, ex);
+                    }
+                }
+
+                g2.setTransform(trans.toTransform());
+                g2.drawTransparentString(text.toString(), (float) x, (float) y);
+            }
+        }
+
     }
 
     private static String jsArrColor(RGB rgb) {

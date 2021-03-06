@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,10 +15,12 @@
  * License along with this library. */
 package com.jpexs.decompiler.flash.abc.avm2.model;
 
+import com.jpexs.decompiler.flash.abc.avm2.model.clauses.DeclarationAVM2Item;
 import com.jpexs.decompiler.flash.helpers.GraphTextWriter;
 import com.jpexs.decompiler.graph.GraphPart;
 import com.jpexs.decompiler.graph.GraphSourceItem;
 import com.jpexs.decompiler.graph.GraphTargetItem;
+import com.jpexs.decompiler.graph.GraphTargetVisitorInterface;
 import com.jpexs.decompiler.graph.TypeItem;
 import com.jpexs.decompiler.graph.model.LocalData;
 
@@ -26,11 +28,32 @@ import com.jpexs.decompiler.graph.model.LocalData;
  *
  * @author JPEXS
  */
-public class SetSuperAVM2Item extends AVM2Item {
+public class SetSuperAVM2Item extends AVM2Item implements SetTypeAVM2Item {
 
     public GraphTargetItem object;
 
     public FullMultinameAVM2Item propertyName;
+
+    public DeclarationAVM2Item declaration;
+
+    @Override
+    public DeclarationAVM2Item getDeclaration() {
+        return declaration;
+    }
+
+    @Override
+    public void setDeclaration(DeclarationAVM2Item declaration) {
+        this.declaration = declaration;
+    }
+
+    @Override
+    public void visit(GraphTargetVisitorInterface visitor) {
+        visitor.visit(object);
+        visitor.visit(propertyName);
+        if (value != null) {
+            visitor.visit(value);
+        }
+    }
 
     @Override
     public GraphPart getFirstPart() {
@@ -46,8 +69,10 @@ public class SetSuperAVM2Item extends AVM2Item {
     @Override
     public GraphTextWriter appendTo(GraphTextWriter writer, LocalData localData) throws InterruptedException {
         if (!object.toString().equals("this")) {
-            object.toString(writer, localData);
-            writer.append(".");
+            if (!(object.getThroughDuplicate() instanceof FindPropertyAVM2Item)) {
+                object.toString(writer, localData);
+                writer.append(".");
+            }
         }
         writer.append("super.");
         propertyName.toString(writer, localData);
@@ -68,5 +93,15 @@ public class SetSuperAVM2Item extends AVM2Item {
     @Override
     public boolean hasReturnValue() {
         return false;
+    }
+
+    @Override
+    public GraphTargetItem getObject() {
+        return new GetSuperAVM2Item(getInstruction(), getLineStartIns(), object, propertyName);
+    }
+
+    @Override
+    public GraphTargetItem getValue() {
+        return value;
     }
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS
+ *  Copyright (C) 2010-2021 JPEXS
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,6 +26,8 @@ import com.jpexs.decompiler.flash.configuration.ConfigurationItemChangeListener;
 import com.jpexs.decompiler.flash.console.ContextMenuTools;
 import com.jpexs.decompiler.flash.gui.debugger.DebuggerTools;
 import com.jpexs.decompiler.flash.gui.helpers.CheckResources;
+import com.jpexs.decompiler.flash.search.ScriptSearchListener;
+import com.jpexs.decompiler.flash.search.ScriptSearchResult;
 import com.jpexs.decompiler.flash.tags.ABCContainerTag;
 import com.jpexs.helpers.ByteArrayRange;
 import com.jpexs.helpers.Helper;
@@ -44,9 +46,11 @@ import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,10 +103,9 @@ public abstract class MainFrameMenu implements MenuBuilder {
 
     protected final Map<String, ActionListener> menuActions = new HashMap<>();
 
-    public boolean isInternalFlashViewerSelected() {
+    /*public boolean isInternalFlashViewerSelected() {
         return isMenuChecked("/settings/internalViewer"); //miInternalViewer.isSelected();
-    }
-
+    }*/
     private final boolean externalFlashPlayerUnavailable;
 
     public MainFrameMenu(MainFrame mainFrame, boolean externalFlashPlayerUnavailable) {
@@ -124,14 +127,12 @@ public abstract class MainFrameMenu implements MenuBuilder {
         return true;
     }
 
-    protected boolean saveActionPerformed(ActionEvent evt) {
-        if (Main.isWorking()) {
-            return false;
-        }
-
+    private boolean saveSwf(SWF swf) {
+        boolean saved = false;
         if (swf != null) {
-            boolean saved = false;
             if (swf.swfList != null && swf.swfList.isBundle()) {
+                File savedFile = new File(swf.swfList.sourceInfo.getFile());
+                Main.startSaving(savedFile);
                 SWFBundle bundle = swf.swfList.bundle;
                 if (!bundle.isReadOnly()) {
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -142,13 +143,14 @@ public abstract class MainFrameMenu implements MenuBuilder {
                         Logger.getLogger(MainFrameMenu.class.getName()).log(Level.SEVERE, "Cannot save SWF", ex);
                     }
                 }
+                Main.stopSaving(savedFile);
             } else if (swf.binaryData != null) {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 try {
                     swf.saveTo(baos);
                     swf.binaryData.binaryData = new ByteArrayRange(baos.toByteArray());
                     swf.binaryData.setModified(true);
-                    saved = true;
+                    saved = saveSwf(swf.binaryData.getSwf()); //save parent swf                   
                 } catch (IOException ex) {
                     Logger.getLogger(MainFrameMenu.class.getName()).log(Level.SEVERE, "Cannot save SWF", ex);
                 }
@@ -167,11 +169,15 @@ public abstract class MainFrameMenu implements MenuBuilder {
                 swf.clearModified();
                 mainFrame.getPanel().refreshTree(swf);
             }
-
-            return true;
         }
+        return saved;
+    }
 
-        return false;
+    protected boolean saveActionPerformed(ActionEvent evt) {
+        if (Main.isWorking()) {
+            return false;
+        }
+        return saveSwf(swf);
     }
 
     protected boolean saveAsActionPerformed(ActionEvent evt) {
@@ -181,7 +187,9 @@ public abstract class MainFrameMenu implements MenuBuilder {
 
         if (swf != null) {
             if (saveAs(swf, SaveFileMode.SAVEAS)) {
-                swf.clearModified();
+                if (swf.swfList != null) { //binarydata won't clear modified on saveas
+                    swf.clearModified();
+                }
             }
 
             return true;
@@ -325,7 +333,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
         View.checkAccess();
 
         if (swf != null) {
-            mainFrame.getPanel().searchInActionScriptOrText(searchInText, swf);
+            mainFrame.getPanel().searchInActionScriptOrText(searchInText, swf, false);
             return true;
         }
 
@@ -426,6 +434,10 @@ public abstract class MainFrameMenu implements MenuBuilder {
 
     protected void clearRecentFilesActionPerformed(ActionEvent evt) {
         Configuration.recentFiles.set(null);
+    }
+
+    protected void clearRecentSearchesActionPerformed(ActionEvent evt) {
+        Main.searchResultsStorage.clear();
     }
 
     protected void removeNonScripts() {
@@ -648,14 +660,14 @@ public abstract class MainFrameMenu implements MenuBuilder {
         }
     }
 
-    protected void internalViewerSwitchActionPerformed(ActionEvent evt) {
+    /*protected void internalViewerSwitchActionPerformed(ActionEvent evt) {
         AbstractButton button = (AbstractButton) evt.getSource();
         boolean selected = button.isSelected();
 
         Configuration.internalFlashViewer.set(selected);
         mainFrame.getPanel().reload(true);
     }
-
+     */
     protected void simplifyExpressionsActionPerformed(ActionEvent evt) {
         AbstractButton button = (AbstractButton) evt.getSource();
         boolean selected = button.isSelected();
@@ -764,7 +776,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
         setMenuEnabled("/debugging/debug/stop", isRunningOrDebugging); //same as previous
 
         setPathVisible("/debugging", isDebugRunning);
-        setMenuEnabled("/debugging/debug", isDebugRunning);
+        setPathVisible("/debugging/debug", isDebugRunning);
         //setMenuEnabled("/debugging/debug/pause", isDebugRunning);
         setMenuEnabled("/debugging/debug/stepOver", isDebugPaused);
         setMenuEnabled("/debugging/debug/stepInto", isDebugPaused);
@@ -903,7 +915,14 @@ public abstract class MainFrameMenu implements MenuBuilder {
         finishMenu("/debugging");
 
         addMenuItem("/tools", translate("menu.tools"), null, null, 0, null, false, null, false);
-        addMenuItem("/tools/search", translate("menu.tools.search"), "search16", this::searchActionPerformed, PRIORITY_TOP, null, true, null, false);
+        addMenuItem("/tools/search", translate("menu.tools.search"), "search16", this::searchActionPerformed, PRIORITY_TOP, this::loadRecentSearches, !supportsMenuAction(), null, false);
+
+        if (!supportsMenuAction()) {
+            addMenuItem("/tools/recentsearch", translate("menu.recentSearches"), null, null, 0, this::loadRecentSearches, false, null, false);
+            finishMenu("/tools/recentsearch");
+        } else {
+            finishMenu("/tools/search");
+        }
 
         addMenuItem("/tools/replace", translate("menu.tools.replace"), "replace32", this::replaceActionPerformed, PRIORITY_TOP, null, true, null, false);
         addToggleMenuItem("/tools/timeline", translate("menu.tools.timeline"), null, "timeline32", this::timelineActionPerformed, PRIORITY_TOP, null);
@@ -935,7 +954,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
 
         addToggleMenuItem("/settings/autoDeobfuscation", translate("menu.settings.autodeobfuscation"), null, null, this::autoDeobfuscationActionPerformed, 0, null);
         addToggleMenuItem("/settings/simplifyExpressions", translate("menu.settings.simplifyExpressions"), null, null, this::simplifyExpressionsActionPerformed, 0, null);
-        addToggleMenuItem("/settings/internalViewer", translate("menu.settings.internalflashviewer"), null, null, this::internalViewerSwitchActionPerformed, 0, null);
+        //addToggleMenuItem("/settings/internalViewer", translate("menu.settings.internalflashviewer"), null, null, this::internalViewerSwitchActionPerformed, 0, null);
         addToggleMenuItem("/settings/parallelSpeedUp", translate("menu.settings.parallelspeedup"), null, null, this::parallelSpeedUpActionPerformed, 0, null);
         addToggleMenuItem("/settings/disableDecompilation", translate("menu.settings.disabledecompilation"), null, null, this::disableDecompilationActionPerformed, 0, null);
         //addToggleMenuItem("/settings/cacheOnDisk", translate("menu.settings.cacheOnDisk"), null, null, this::cacheOnDiskActionPerformed, 0, null);
@@ -962,6 +981,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
         addMenuItem("/settings/advancedSettings", translate("menu.advancedsettings.advancedsettings"), null, null, 0, null, false, null, false);
         addMenuItem("/settings/advancedSettings/advancedSettings", translate("menu.advancedsettings.advancedsettings"), "settings32", this::advancedSettingsActionPerformed, PRIORITY_TOP, null, true, null, false);
         addMenuItem("/settings/advancedSettings/clearRecentFiles", translate("menu.tools.otherTools.clearRecentFiles"), "clearrecent16", this::clearRecentFilesActionPerformed, PRIORITY_MEDIUM, null, true, null, false);
+        addMenuItem("/settings/advancedSettings/clearRecentSearches", translate("menu.tools.otherTools.clearRecentSearches"), "clearrecent16", this::clearRecentSearchesActionPerformed, PRIORITY_MEDIUM, null, true, null, false);
         finishMenu("/settings/advancedSettings");
 
         finishMenu("/settings");
@@ -976,11 +996,11 @@ public abstract class MainFrameMenu implements MenuBuilder {
             setMenuChecked("/settings/simplifyExpressions", newValue);
         });
 
-        setMenuChecked("/settings/internalViewer", Configuration.internalFlashViewer.get() || externalFlashPlayerUnavailable);
+        /*setMenuChecked("/settings/internalViewer", Configuration.internalFlashViewer.get() || externalFlashPlayerUnavailable);
         Configuration.internalFlashViewer.addListener(configListenerInternalFlashViewer = (Boolean newValue) -> {
             setMenuChecked("/settings/internalViewer", newValue || externalFlashPlayerUnavailable);
         });
-
+         */
         setMenuChecked("/settings/parallelSpeedUp", Configuration.parallelSpeedUp.get());
         Configuration.parallelSpeedUp.addListener(configListenerParallelSpeedUp = (Boolean newValue) -> {
             setMenuChecked("/settings/parallelSpeedUp", newValue);
@@ -1010,11 +1030,13 @@ public abstract class MainFrameMenu implements MenuBuilder {
             setMenuChecked("/settings/autoOpenLoadedSWFs", newValue);
         });
 
+        /*
         if (externalFlashPlayerUnavailable) {
             setMenuEnabled("/settings/internalViewer", false);
         }
+         */
 
-        /*int deobfuscationMode = Configuration.deobfuscationMode.get();
+ /*int deobfuscationMode = Configuration.deobfuscationMode.get();
          switch (deobfuscationMode) {
          case 0:
          setGroupSelection("deobfuscation", "/settings/deobfuscation/old");
@@ -1091,7 +1113,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
                     Logger.getLogger(MainFrameMenu.class.getName()).log(Level.SEVERE, null, ex);
                 }
 
-                Main.openFile(new SWFSourceInfo(new ByteArrayInputStream(baos.toByteArray()), "New SWF", "New SWF"));
+                Main.openFile(new SWFSourceInfo(new ByteArrayInputStream(baos.toByteArray()), "new.swf", "New SWF"));
             }, PRIORITY_MEDIUM, null, true, null, false);
             finishMenu("/debug");
         }
@@ -1150,6 +1172,37 @@ public abstract class MainFrameMenu implements MenuBuilder {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    protected void loadRecentSearches(ActionEvent evt) {
+        clearMenu("/tools/" + (supportsMenuAction() ? "search" : "recentsearch"));
+        SWF swf = Main.getMainFrame().getPanel().getCurrentSwf();
+
+        List<Integer> indices = Main.searchResultsStorage.getIndicesForSwf(swf);
+        for (int i = 0; i < indices.size(); i++) {
+            final int fi = indices.get(i);
+            String searched = Main.searchResultsStorage.getSearchedValueAt(fi);
+            ActionListener a = (ActionEvent e) -> {
+                SearchResultsDialog sr;
+                List<SearchListener<ScriptSearchResult>> listeners = new ArrayList<>();
+                listeners.add(Main.getMainFrame().getPanel().getABCPanel());
+                listeners.add(Main.getMainFrame().getPanel().getActionPanel());
+
+                if (swf.isAS3()) {
+                    sr = new SearchResultsDialog<>(Main.getMainFrame().getWindow(), searched, Main.searchResultsStorage.isIgnoreCaseAt(fi), Main.searchResultsStorage.isRegExpAt(fi), listeners);
+
+                } else {
+                    sr = new SearchResultsDialog<>(Main.getMainFrame().getWindow(), searched, Main.searchResultsStorage.isIgnoreCaseAt(fi), Main.searchResultsStorage.isRegExpAt(fi), listeners);
+                }
+                sr.setResults(Main.searchResultsStorage.getSearchResultsAt(mainFrame.getPanel().getAllSwfs(), fi));
+                sr.setVisible(true);
+                Main.getMainFrame().getPanel().searchResultsDialogs.add(sr);
+            };
+            addMenuItem("/tools/" + (supportsMenuAction() ? "search" : "recentsearch") + "/" + i, searched, null, a, 0, null, true, null, false);
+        }
+
+        finishMenu("/tools/" + (supportsMenuAction() ? "search" : "recentsearch"));
+    }
+
     protected void loadRecent(ActionEvent evt) {
         List<String> recentFiles = Configuration.getRecentFiles();
         clearMenu("/file/" + (supportsMenuAction() ? "open" : "recent"));
@@ -1178,7 +1231,7 @@ public abstract class MainFrameMenu implements MenuBuilder {
 
         Configuration.autoDeobfuscate.removeListener(configListenerAutoDeobfuscate);
         Configuration.simplifyExpressions.removeListener(configListenerSimplifyExpressions);
-        Configuration.internalFlashViewer.removeListener(configListenerInternalFlashViewer);
+        //Configuration.internalFlashViewer.removeListener(configListenerInternalFlashViewer);
         Configuration.parallelSpeedUp.removeListener(configListenerParallelSpeedUp);
         Configuration.decompile.removeListener(configListenerDecompile);
         //Configuration.cacheOnDisk.removeListener(configListenerCacheOnDisk);

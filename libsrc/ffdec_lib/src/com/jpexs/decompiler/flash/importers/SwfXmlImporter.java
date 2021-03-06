@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010-2018 JPEXS, All rights reserved.
+ *  Copyright (C) 2010-2021 JPEXS, All rights reserved.
  * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -105,7 +105,6 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -174,25 +173,25 @@ public class SwfXmlImporter {
     }
 
     private static void setFieldValue(Field field, Object obj, Object value) throws IllegalArgumentException, IllegalAccessException, NoSuchFieldException {
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
+       /* Unsupported in java 9+ Field modifiersField = Field.class.getDeclaredField("modifiers");
         modifiersField.setAccessible(true);
 
         //Remove final attribute temporary (For example Multiname.namespace_set_index
         int originalModifiers = field.getModifiers();
         if ((originalModifiers & Modifier.FINAL) > 0) {
             modifiersField.setInt(field, originalModifiers & ~Modifier.FINAL);
-        }
+        }        
 
         field.setAccessible(true);
 
         int newModifiers = field.getModifiers();
-
+*/
         field.set(obj, value);
 
-        //Put final back in
+  /*      //Put final back in
         if (originalModifiers != newModifiers) {
             modifiersField.setInt(field, originalModifiers);
-        }
+        }*/
     }
 
     private void processElement(Element element, Object obj, SWF swf, Tag tag) {
